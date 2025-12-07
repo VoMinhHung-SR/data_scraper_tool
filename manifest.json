@@ -16,6 +16,9 @@
       "matches": ["*://*/*"],
       "js": [
         "config.js",
+        "services/dom-utils.js",
+        "services/selector-utils.js",
+        "services/extraction-utils.js",
         "utils.js",
         "api-scraper.js",
         "content.js"

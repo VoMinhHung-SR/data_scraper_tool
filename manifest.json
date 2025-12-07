@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "📊 Data Scraper Tool",
+  "version": "1.0",
+  "description": "Công cụ scrape và export dữ liệu từ trang web",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": [
+        "config.js",
+        "utils.js",
+        "api-scraper.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "scripting",
+    "activeTab",
+    "storage",
+    "downloads",
+    "webRequest"
+  ],
+  "host_permissions": ["*://*/*"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -21,6 +21,8 @@
         "services/extraction-utils.js",
         "utils.js",
         "api-scraper.js",
+        "handlers/highlight-manager.js",
+        "handlers/message-handler.js",
         "content.js"
       ],
       "run_at": "document_idle"

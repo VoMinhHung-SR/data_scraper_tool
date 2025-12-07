@@ -19,8 +19,12 @@
         "services/dom-utils.js",
         "services/selector-utils.js",
         "services/extraction-utils.js",
+        "services/state-manager.js",
         "utils.js",
-        "api-scraper.js",
+        "core/api-scraper.js",
+        "core/base-scraper.js",
+        "core/pagination-handler.js",
+        "core/product-scraper.js",
         "handlers/highlight-manager.js",
         "handlers/message-handler.js",
         "content.js"

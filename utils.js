@@ -2,220 +2,99 @@
   'use strict';
 
   // ============================================
-  // 🔧 UTILITY FUNCTIONS
+  // 🔧 UTILITY FUNCTIONS (Backward Compatibility Layer)
   // ============================================
+  // This file now delegates to the new modular structure
+  // while maintaining backward compatibility
+  
   window.DataScraperUtils = {
-    // Safe query selector
+    // ============================================
+    // DOM UTILITIES (delegate to dom-utils.js)
+    // ============================================
     safeQuery: (selector, context = document) => {
-      try {
-        return context.querySelector(selector);
-      } catch (e) {
-        return null;
-      }
+      return window.DataScraperDOMUtils.safeQuery(selector, context);
     },
 
     safeQueryAll: (selector, context = document) => {
-      try {
-        return Array.from(context.querySelectorAll(selector));
-      } catch (e) {
-        return [];
-      }
+      return window.DataScraperDOMUtils.safeQueryAll(selector, context);
     },
 
-    // Extract text content safely
     getText: (element, maxLength = null) => {
-      if (!element) return '';
-      const text = element.textContent?.trim() || '';
-      return maxLength ? text.substring(0, maxLength) : text;
+      return window.DataScraperDOMUtils.getText(element, maxLength);
     },
 
-    // Find best selector from list
+    findContainer: (containerSelector = null) => {
+      return window.DataScraperDOMUtils.findContainer(containerSelector);
+    },
+
+    isVisible: (element) => {
+      return window.DataScraperDOMUtils.isVisible(element);
+    },
+
+    isInViewport: (element) => {
+      return window.DataScraperDOMUtils.isInViewport(element);
+    },
+
+    // ============================================
+    // SELECTOR UTILITIES (delegate to selector-utils.js)
+    // ============================================
     findBestSelector: (selectors, minCount = 3) => {
-      let bestSelector = null;
-      let maxCount = 0;
-
-      for (const sel of selectors) {
-        try {
-          const count = document.querySelectorAll(sel).length;
-          if (count >= minCount && count > maxCount) {
-            bestSelector = sel;
-            maxCount = count;
-          }
-        } catch (e) {
-          // Skip invalid selector
-        }
-      }
-
-      return { selector: bestSelector, count: maxCount };
+      return window.DataScraperSelectorUtils.findBestSelector(selectors, minCount);
     },
 
-    // Find container
-    findContainer: (containerSelector) => {
-      if (containerSelector) {
-        const container = this.safeQuery(containerSelector);
-        if (container) return container;
-      }
-
-      const gridSelectors = ['.grid.grid-cols-2', '.grid[class*="grid-cols"]', '[class*="grid"][class*="gap"]'];
-      for (const sel of gridSelectors) {
-        const container = this.safeQuery(sel);
-        if (container) return container;
-      }
-      return document.body;
+    autoDetectProductSelector: () => {
+      return window.DataScraperSelectorUtils.autoDetectProductSelector();
     },
 
-    // Find "Xem thêm" / Load More button
-    findLoadMoreButton: (customSelector = null) => {
-      if (customSelector) {
-        const button = window.DataScraperUtils.safeQuery(customSelector);
-        if (button && button.offsetParent !== null) return button;
-      }
-
-      const allButtons = window.DataScraperUtils.safeQueryAll('button');
-      const loadMoreButton = allButtons.find(el => {
-        if (!el.offsetParent) return false;
-        const text = window.DataScraperUtils.getText(el).toLowerCase().trim();
-        const tagName = el.tagName.toLowerCase();
-        if (tagName !== 'button' || el.href) return false;
-        
-        const parent = el.closest('nav, [class*="category"], [class*="menu"], [class*="sidebar"]');
-        if (parent) return false;
-        
-        return text.startsWith('xem thêm') || text.startsWith('xem tiếp') || 
-               text.startsWith('load more') || /xem\s+thêm\s+\d+/.test(text);
-      });
-
-      return loadMoreButton || null;
-    },
-
-    // Find next page button
     findNextPageButton: (customSelector = null) => {
-      if (customSelector) {
-        return window.DataScraperUtils.safeQuery(customSelector);
-      }
-
-      const selectors = [
-        'a[aria-label*="next" i]', 'a[aria-label*="sau" i]',
-        'button[aria-label*="next" i]', 'button[aria-label*="sau" i]',
-        '[class*="next"]', '[class*="pagination-next"]',
-        'a[href*="page="]', 'a[href*="p="]'
-      ];
-
-      for (const sel of selectors) {
-        try {
-          const buttons = window.DataScraperUtils.safeQueryAll(sel);
-          for (const button of buttons) {
-            if (button?.offsetParent) {
-              const text = window.DataScraperUtils.getText(button).toLowerCase();
-              if (text.includes('next') || text.includes('sau') || text === '>') {
-                return button;
-              }
-            }
-          }
-        } catch (e) {}
-      }
-
-      const allLinks = window.DataScraperUtils.safeQueryAll('a, button');
-      return allLinks.find(el => {
-        const text = window.DataScraperUtils.getText(el).toLowerCase();
-        return text.includes('trang sau') || text.includes('next') || 
-               (text === '>' && el.href?.includes('page'));
-      }) || null;
+      return window.DataScraperSelectorUtils.findNextPageButton(customSelector);
     },
 
-    // Extract product info from element
+    findLoadMoreButton: (customSelector = null) => {
+      return window.DataScraperSelectorUtils.findLoadMoreButton(customSelector);
+    },
+
+    testSelector: (selector, sampleSize = 5) => {
+      return window.DataScraperSelectorUtils.testSelector(selector, sampleSize);
+    },
+
+    // ============================================
+    // EXTRACTION UTILITIES (delegate to extraction-utils.js)
+    // ============================================
     extractProductInfo: (item, link) => {
-      const Utils = window.DataScraperUtils;
-      const card = item.tagName !== 'A' ? item : item.closest('div, article, li, section') || item;
-      
-      // Extract name
-      const heading = Utils.safeQuery('h1, h2, h3, h4, h5, h6', card);
-      let name = heading ? Utils.getText(heading) : '';
-      
-      if (!name && link) {
-        const linkText = Utils.getText(link);
-        const lines = linkText.split('\n').map(l => l.trim()).filter(l => l);
-        name = lines[0]?.replace(/\d+\.?\d*\s*[₫đ]/g, '').trim() || '';
-      }
+      return window.DataScraperExtractionUtils.extractProductInfo(item, link);
+    },
 
-      // Extract price
-      let price = '';
-      const priceSpan = Utils.safeQuery('span.font-semibold, [class*="font-semibold"]', card);
-      if (priceSpan) {
-        const priceText = Utils.getText(priceSpan);
-        if (priceText.match(/\d+\.?\d*\s*[₫đ]/)) {
-          price = priceText.trim();
-        }
-      }
-      
-      if (!price) {
-        const priceElements = Utils.safeQueryAll('*', card);
-        for (const el of priceElements) {
-          if (el.tagName.toLowerCase() === 'button' || el.closest('button')) continue;
-          const text = Utils.getText(el).trim();
-          if (text.match(/^\d+[.,]?\d*\s*[₫đ]$/)) {
-            price = text;
-            break;
-          }
-        }
-      }
+    extractName: (card, link) => {
+      return window.DataScraperExtractionUtils.extractName(card, link);
+    },
 
-      if (!price) {
-        const priceElements = Utils.safeQueryAll('*', card);
-        for (const el of priceElements) {
-          if (el.tagName.toLowerCase() === 'button' || el.closest('button')) continue;
-          const text = Utils.getText(el).trim();
-          if (text.match(/\d+\.?\d*\s*[₫đ]/) && !text.toLowerCase().includes('chọn mua')) {
-            const priceMatch = text.match(/(\d+[.,]?\d*\s*[₫đ])/);
-            if (priceMatch) {
-              price = priceMatch[1].trim();
-              break;
-            }
-          }
-        }
-      }
+    extractPrice: (card) => {
+      return window.DataScraperExtractionUtils.extractPrice(card);
+    },
 
-      // Extract image
-      const img = Utils.safeQuery('img', card) || Utils.safeQuery('img', link);
-      const image = img?.src || '';
+    extractImage: (card, link) => {
+      return window.DataScraperExtractionUtils.extractImage(card, link);
+    },
 
-      // Extract package info
-      let packageInfo = '';
-      const packageP = Utils.safeQuery('p[class*="bg-layer-gray"], p[class*="layer-gray"]', card);
-      if (packageP) {
-        const packageText = Utils.getText(packageP).trim();
-        if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)/i.test(packageText)) {
-          packageInfo = packageText;
-        }
-      }
-      
-      if (!packageInfo) {
-        const packageSpan = Utils.safeQuery('span[class*="text-label2"], span[class*="text-label"]', card);
-        if (packageSpan) {
-          const packageText = Utils.getText(packageSpan).trim();
-          if (/^\/\s*(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)/i.test(packageText)) {
-            packageInfo = packageText;
-          }
-        }
-      }
-      
-      if (!packageInfo) {
-        const cardClone = card.cloneNode(true);
-        Utils.safeQueryAll('button, [role="button"]', cardClone).forEach(btn => {
-          const btnText = Utils.getText(btn).toLowerCase();
-          if (btnText.includes('chọn mua') || btnText.includes('mua')) {
-            btn.remove();
-          }
-        });
-        const cardText = Utils.getText(cardClone);
-        const packageMatch = cardText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*(x\s*)?\d+[^đ]*/i);
-        if (packageMatch) {
-          packageInfo = packageMatch[0].trim();
-        }
-      }
+    extractPackage: (card) => {
+      return window.DataScraperExtractionUtils.extractPackage(card);
+    },
 
-      return { name, price, image, package: packageInfo };
+    extractSKU: (container) => {
+      return window.DataScraperExtractionUtils.extractSKU(container);
+    },
+
+    extractBrand: (container) => {
+      return window.DataScraperExtractionUtils.extractBrand(container);
+    },
+
+    extractSpecifications: (container) => {
+      return window.DataScraperExtractionUtils.extractSpecifications(container);
+    },
+
+    cleanSectionText: (text) => {
+      return window.DataScraperExtractionUtils.cleanSectionText(text);
     }
   };
 })();
-

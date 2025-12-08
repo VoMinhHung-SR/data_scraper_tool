@@ -405,7 +405,14 @@
     <div id="message"></div>
   </div>
 
-  <script src="popup.js"></script>
+  <!-- Load modules in order -->
+  <script src="ui/popup-state.js"></script>
+  <script src="ui/popup-display.js"></script>
+  <script src="ui/popup-scrape.js"></script>
+  <script src="handlers/export-handler.js"></script>
+  <script src="handlers/generic-handlers.js"></script>
+  <script src="handlers/ecommerce-handlers.js"></script>
+  <script src="popup-main.js"></script>
 </body>
 </html>
 

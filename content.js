@@ -29,14 +29,16 @@
 
     // Product scraping (from core/product-scraper.js)
     scrapeProducts: ProductScraper?.scrapeProducts || function() { return []; },
-    scrapeProductsWithPagination: ProductScraper?.scrapeProductsWithPagination || function() { return Promise.resolve([]); },
-    scrapeProductsWithScroll: ProductScraper?.scrapeProductsWithScroll || function() { return Promise.resolve([]); },
+    
+    // Pagination & Scroll (from core/pagination-handler.js)
+    scrapeProductsWithPagination: PaginationHandler?.scrapeWithPagination || function() { return Promise.resolve([]); },
+    scrapeProductsWithScroll: PaginationHandler?.scrapeWithScroll || function() { return Promise.resolve([]); },
 
     // Detail scraping (keep in content.js for now, will optimize later)
     // Scrape chi tiết sản phẩm từ trang detail (ưu tiên API, fallback DOM)
-    scrapeProductDetail: async () => {
+    scrapeProductDetail: async (forceAPI = false) => {
       try {
-        log(`Bắt đầu scrape product detail từ: ${window.location.href}`, '🔍');
+        log(`Bắt đầu scrape product detail từ: ${window.location.href}${forceAPI ? ' (Force API)' : ''}`, '🔍');
         
         // Bước 1: Extract SKU từ URL hoặc DOM để gọi API
         let sku = '';
@@ -75,7 +77,7 @@
           }
         }
 
-        // Bước 2: Ưu tiên scrape từ API nếu có SKU
+        // Bước 2: Ưu tiên scrape từ API nếu có SKU hoặc forceAPI
         if (sku && API?.scrapeProductDetailBySKU) {
           log(`Đang scrape từ API với SKU: ${sku}`, '🌐');
           try {
@@ -84,15 +86,29 @@
               log(`Đã lấy chi tiết từ API: ${apiDetail.name || apiDetail.sku}`, '✅');
               return apiDetail;
             }
+            if (forceAPI) {
+              log(`Force API nhưng không trả về data, thử lại...`, '⚠️');
+              // Retry với delay
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              const retryDetail = await API.scrapeProductDetailBySKU(sku);
+              if (retryDetail && retryDetail.sku) {
+                log(`Đã lấy chi tiết từ API (retry): ${retryDetail.name || retryDetail.sku}`, '✅');
+                return retryDetail;
+              }
+            }
             log(`API không trả về data, fallback về DOM`, '⚠️');
           } catch (apiError) {
             log(`Lỗi API: ${apiError.message}, fallback về DOM`, '⚠️');
           }
         } else {
+          if (forceAPI) {
+            log(`Force API nhưng không tìm thấy SKU, scrape từ DOM`, '⚠️');
+        } else {
           log(`Không tìm thấy SKU hoặc API không khả dụng, scrape từ DOM`, '⚠️');
+          }
         }
 
-        // Bước 3: Fallback về DOM scraping
+        // Bước 3: Fallback về DOM scraping (trừ khi forceAPI và đã có data từ API)
         const domData = Scraper.scrapeProductDetailFromDOM();
         if (domData) {
           log(`Đã scrape từ DOM: ${domData.name || domData.sku || 'unknown'}`, '✅');
@@ -401,19 +417,130 @@
         });
         
         // Extract category path - từ link hoặc text
+        // Extract category and categorySlug from breadcrumb
         let categoryPath = '';
-        const categoryLink = Utils.safeQuery('a[href*="/thuc-pham-chuc-nang/"]', productInfoContainer);
-        if (categoryLink) {
-          categoryPath = Utils.getText(categoryLink).trim();
+        let categorySlug = '';
+        let category = [];
+        
+        // Try product detail breadcrumb first (more specific)
+        const productBreadcrumb = Utils.safeQuery('[data-lcpr="prr-id-product-detail-breadcrumb"]') ||
+                                   Utils.safeQuery('[data-lcpr="prr-id-category-breadcrumb"]') ||
+                                   Utils.safeQuery('ol[class*="breadcrumb"]') ||
+                                   Utils.safeQuery('[class*="breadcrumb"]');
+        
+        if (productBreadcrumb) {
+          const breadcrumbLinks = Utils.safeQueryAll('a', productBreadcrumb);
+          if (breadcrumbLinks.length > 0) {
+            // Extract category path and slugs from breadcrumb links
+            const categoryNames = [];
+            const categorySlugs = [];
+            
+            breadcrumbLinks.forEach(link => {
+              const linkText = Utils.getText(link).trim();
+              const linkHref = link.href || '';
+              
+              // Skip "Trang chủ" (Homepage)
+              if (linkText && !linkText.match(/trang\s+chủ|homepage/i)) {
+                categoryNames.push(linkText);
+                
+                // Extract slug from href - flexible for any category path
+                if (linkHref) {
+                  try {
+                    const urlObj = new URL(linkHref);
+                    const pathSegments = urlObj.pathname.split('/').filter(p => p && !p.includes('.html') && !p.includes('.'));
+                    
+                    if (pathSegments.length > 0) {
+                      // Use the last segment as slug (or all segments for nested categories)
+                      categorySlugs.push(pathSegments[pathSegments.length - 1]);
         } else {
-          const categoryP = Utils.safeQuery('p.text-body1', productInfoContainer);
-          if (categoryP) {
-            categoryPath = Utils.getText(categoryP).trim();
-          } else {
-            const breadcrumb = Utils.safeQuery('[class*="breadcrumb"]');
-            if (breadcrumb) {
-              categoryPath = Utils.getText(breadcrumb).replace(/\s+/g, ' > ').trim();
+                      // Fallback: extract from URL path
+                      const pathMatch = linkHref.match(/\/([^\/]+)\/?$/);
+                      if (pathMatch && !pathMatch[1].includes('.')) {
+                        categorySlugs.push(pathMatch[1]);
+                      }
+                    }
+                  } catch (e) {
+                    // Fallback: extract from URL path
+                    const pathMatch = linkHref.match(/\/([^\/]+)\/?$/);
+                    if (pathMatch && !pathMatch[1].includes('.')) {
+                      categorySlugs.push(pathMatch[1]);
+                    }
+                  }
+                }
+              }
+            });
+            
+            if (categoryNames.length > 0) {
+              categoryPath = categoryNames.join(' > ');
+              categorySlug = categorySlugs.join('/');
+              category = categoryNames.map((name, idx) => ({
+                name: name,
+                slug: categorySlugs[idx] || ''
+              }));
             }
+          } else {
+            // Fallback: extract from breadcrumb text
+            const breadcrumbText = Utils.getText(productBreadcrumb);
+            if (breadcrumbText) {
+              const parts = breadcrumbText.split('/').map(p => p.trim()).filter(p => p && !p.match(/trang\s+chủ|homepage/i));
+              if (parts.length > 0) {
+                categoryPath = parts.join(' > ');
+                category = parts.map(name => ({ name: name, slug: '' }));
+              }
+            }
+          }
+        }
+        
+        // Fallback: try category link - flexible for any category
+        if (!categoryPath) {
+          // Find any link that looks like a category link (has path segments, no .html)
+          const allLinks = Utils.safeQueryAll('a[href]', productInfoContainer);
+          for (const categoryLink of allLinks) {
+            const href = categoryLink.href || '';
+            // Accept same-domain or relative links that look like category paths (no .html, has path segments)
+            const isSameSite = href.startsWith('http') ? href.includes(window.location.host) : true;
+            if (href && isSameSite && 
+                !href.includes('.html') && 
+                href.match(/\/[^\/]+\/[^\/]+$/)) {
+              categoryPath = Utils.getText(categoryLink).trim();
+              if (categoryPath) {
+                try {
+                  const urlObj = new URL(href);
+                  const pathSegments = urlObj.pathname.split('/').filter(p => p);
+                  if (pathSegments.length > 0) {
+                    categorySlug = pathSegments[pathSegments.length - 1];
+                    category = [{ name: categoryPath, slug: categorySlug }];
+                    break;
+                  }
+                } catch (e) {
+                  // Skip invalid URL
+                }
+              }
+            }
+          }
+        }
+        
+        // Fallback: try category from table
+        if (!categoryPath) {
+          const categoryRow = Utils.safeQuery('tr.content-container, tr[class*="category"]', productInfoContainer);
+          if (categoryRow) {
+            const rowText = Utils.getText(categoryRow);
+            const categoryMatch = rowText.match(/Danh\s+mục[:\s]+([^\n\r]+)/i);
+            if (categoryMatch) {
+              categoryPath = categoryMatch[1].trim();
+              category = [{ name: categoryPath, slug: '' }];
+            }
+          }
+        }
+        
+        // Fallback: extract from URL - flexible for any category path
+        if (!categoryPath && window.location.pathname) {
+          const pathParts = window.location.pathname.split('/').filter(p => p && !p.includes('.html') && !p.includes('.'));
+          if (pathParts.length > 0) {
+            // Use all path parts as category (no filtering - accept any category)
+            categoryPath = pathParts.join(' > ');
+            categorySlug = pathParts.join('/');
+            category = pathParts.map(name => ({ name: name, slug: name }));
           }
         }
         
@@ -726,7 +853,9 @@
           reviewCount: (reviewCount || '').trim(),
           commentCount: (commentCount || '').trim(),
           reviews: reviewCount && commentCount ? `${reviewCount} đánh giá, ${commentCount} bình luận` : '',
+          category: Array.isArray(category) && category.length > 0 ? category : [],
           categoryPath: (categoryPath || '').trim(),
+          categorySlug: (categorySlug || '').trim(),
           image: (mainImage || '').trim(),
           images: Array.isArray(images) ? images.filter(img => img && typeof img === 'string' && img.trim()) : [],
           // Các section từ detail-content-*
@@ -806,8 +935,16 @@
         links: normalizedLinks,
         currentIndex: 0,
         details: [],
+        maxDetails: maxDetails, // Store maxDetails limit
+        forceAPI: options.forceAPI || false, // Store forceAPI option
         startedAt: Date.now()
       };
+      
+      // Create progress indicator
+      if (window.DataScraperProgressIndicator) {
+        window.DataScraperProgressIndicator.create();
+        window.DataScraperProgressIndicator.update(0);
+      }
       
       await new Promise(resolve => {
         chrome.storage.local.set({ [stateKey]: state }, () => {
@@ -1014,7 +1151,8 @@
   // 🔄 INTERCEPT API CALLS FOR PRODUCT DETAIL
   // ============================================
   // Intercept API calls khi vào trang detail để lưu data
-  if (window.location.href.includes('.html') && window.location.href.includes('/thuc-pham-chuc-nang/')) {
+  // Flexible: accept any .html page
+  if (window.location.href.includes('.html')) {
     const originalFetch = window.fetch;
     window.fetch = function(...args) {
       const url = args[0];
@@ -1055,31 +1193,94 @@
       const state = result.scrapeDetailsState;
       const currentUrl = window.location.href;
       
-      // Check if current page is a product detail page
-      if (currentUrl.includes('.html') && currentUrl.includes('/thuc-pham-chuc-nang/')) {
-        log(`Phát hiện trang detail, đang scrape...`, '🔍');
+      // Check if current page is a product detail page (flexible URL check)
+      // Accept any .html page
+      const isProductPage = currentUrl.includes('.html');
+      
+      if (isProductPage) {
+        log(`Phát hiện trang detail, đang scrape... (${state.currentIndex + 1}/${state.links.length})`, '🔍');
+        
+        // Update progress indicator
+        const total = state.links.length;
+        const current = state.currentIndex + 1;
+        const percent = Math.round((current / total) * 100);
+        if (window.DataScraperProgressIndicator) {
+          window.DataScraperProgressIndicator.update(percent);
+        }
         
         // Wait for page ready
         const scrapeAndContinue = async () => {
-          const detail = await Scraper.scrapeProductDetail();
+          try {
+            // Check if forceAPI is set in state
+            const forceAPI = state.forceAPI || false;
+            const detail = await Scraper.scrapeProductDetail(forceAPI);
           if (detail) {
             state.details.push(detail);
-            log(`Đã scrape ${state.details.length}/${state.links.length}: ${detail.name || detail.sku}`, '✅');
+              log(`Đã scrape ${state.details.length}/${state.links.length}: ${detail.name || detail.sku || 'N/A'}`, '✅');
+              
+              // Update progress after scrape
+              const newPercent = Math.round((state.details.length / total) * 100);
+              if (window.DataScraperProgressIndicator) {
+                window.DataScraperProgressIndicator.update(newPercent);
+              }
+            } else {
+              log(`Không scrape được chi tiết cho sản phẩm ${state.currentIndex + 1}`, '⚠️');
+            }
+          } catch (error) {
+            log(`Lỗi khi scrape chi tiết: ${error.message}`, '❌');
           }
           
           state.currentIndex++;
           
-          // Check if done
-          if (state.currentIndex >= state.links.length) {
+          // Check if we've reached maxDetails limit or end of links
+          if (state.currentIndex >= state.links.length || state.details.length >= (state.maxDetails || state.links.length)) {
             chrome.storage.local.remove(['scrapeDetailsState']);
             log(`Hoàn thành scrape ${state.details.length} chi tiết!`, '🎉');
             
-            // Send result to popup
+            // Show completion indicator
+            if (window.DataScraperProgressIndicator) {
+              window.DataScraperProgressIndicator.complete();
+            }
+            
+            // Save to storage first (fallback if popup is closed)
+            chrome.storage.local.set({
+              'scraper_detail_data': {
+                data: state.details,
+                timestamp: Date.now(),
+                count: state.details.length,
+                type: 'detail',
+                maxProducts: state.maxDetails || state.details.length
+              }
+            }, () => {
+              log(`Đã lưu ${state.details.length} chi tiết vào storage`, '💾');
+            });
+            
+            // Send result to popup with retry mechanism
+            const sendResult = (retryCount = 0) => {
             chrome.runtime.sendMessage({
               action: 'detailsScrapingComplete',
               data: state.details,
+                maxProducts: state.maxDetails || state.details.length,
               timestamp: new Date().toISOString()
-            });
+              }, (response) => {
+                if (chrome.runtime.lastError) {
+                  if (chrome.runtime.lastError.message.includes('Receiving end does not exist')) {
+                    // Popup is closed, data is already saved to storage
+                    log(`Popup đã đóng, data đã được lưu vào storage. Sẽ hiển thị khi mở lại popup.`, '💾');
+                  } else if (retryCount < 3) {
+                    log(`Lỗi gửi message, retry ${retryCount + 1}/3...`, '⚠️');
+                    setTimeout(() => sendResult(retryCount + 1), 1000);
+                  } else {
+                    log(`Không thể gửi message về popup: ${chrome.runtime.lastError.message}`, '❌');
+                    log(`Data đã được lưu vào storage, sẽ hiển thị khi mở lại popup.`, '💾');
+                  }
+                } else {
+                  log(`✓ [DataScraper] Đã gửi ${state.details.length} chi tiết về popup`, '✅');
+                }
+              });
+            };
+            
+            sendResult();
             return;
           }
           
@@ -1093,16 +1294,42 @@
               log(`Chuyển đến sản phẩm ${state.currentIndex + 1}/${state.links.length}...`, '🔄');
               setTimeout(() => {
                 window.location.href = nextLink;
-              }, 1000);
+              }, 1500);
+            });
+          } else {
+            log(`Không tìm thấy link tiếp theo, kết thúc`, '⏹️');
+            chrome.storage.local.remove(['scrapeDetailsState']);
+            
+            // Save to storage first (fallback if popup is closed)
+            chrome.storage.local.set({
+              'scraper_detail_data': {
+                data: state.details,
+                timestamp: Date.now(),
+                count: state.details.length,
+                type: 'detail',
+                maxProducts: state.maxDetails || state.details.length
+              }
+            });
+            
+            // Send partial results
+            chrome.runtime.sendMessage({
+              action: 'detailsScrapingComplete',
+              data: state.details,
+              maxProducts: state.maxDetails || state.details.length,
+              timestamp: new Date().toISOString()
+            }, (response) => {
+              if (chrome.runtime.lastError) {
+                log(`Popup đã đóng, data đã được lưu vào storage.`, '💾');
+              }
             });
           }
         };
         
         if (document.readyState === 'complete') {
-          setTimeout(scrapeAndContinue, 2000);
+          setTimeout(scrapeAndContinue, 2500);
         } else {
           window.addEventListener('load', () => {
-            setTimeout(scrapeAndContinue, 2000);
+            setTimeout(scrapeAndContinue, 2500);
           });
         }
       }
@@ -1149,10 +1376,35 @@
 
           items.forEach((item) => {
             try {
-              const link = item.tagName === 'A' ? item : Utils.safeQuery('a[href*=".html"], a[href*="/thuc-pham-chuc-nang/"]', item);
+              let link = null;
+              let card = item;
+              
+              // If item is already an <a> tag, use it as link and find parent container
+              if (item.tagName === 'A') {
+                link = item;
+                // Find parent container for extraction
+                card = item.closest('[class*="product"], [class*="card"], [class*="item"]') 
+                    || item.closest('div, article, li, section') 
+                    || item.parentElement 
+                    || item;
+              } else {
+                // Flexible link finding for all product types
+                // Try .html first (most common pattern), then any valid link
+                link = Utils.safeQuery('a[href*=".html"]', item) 
+                    || Utils.safeQuery('a[href]:not([href^="#"]):not([href^="javascript:"]):not([href^="mailto:"]):not([href^="tel:"])', item);
+                card = item;
+              }
+              
               if (!link || !link.href || products.has(link.href)) return;
 
-              const info = Utils.extractProductInfo(item, link);
+              // Skip non-product links
+              // Accept any link with .html (flexible for all categories/domains on the site)
+              const href = link.href.toLowerCase();
+              const isProductLink = href.includes('.html') || 
+                (href.match(/\/[^\/]+\/[^\/]+$/) && !href.match(/\/(trang-chu|home|index|search|tim-kiem)/i));
+              if (!isProductLink) return;
+
+              const info = Utils.extractProductInfo(card, link);
               const product = {
                 name: info.name || 'N/A',
                 price: info.price,
@@ -1164,7 +1416,16 @@
                 page: currentPage
               };
 
-              if (product.name && product.name !== 'N/A' && product.name.length > 5 && product.link) {
+              // More lenient validation: allow shorter names if we have valid data
+              // For /thuoc/ pages, product names might be shorter, so be more flexible
+              const hasValidName = product.name && product.name !== 'N/A' && product.name.trim().length > 2;
+              const hasValidPrice = product.price && product.price.trim().length > 0;
+              const hasValidImage = product.image && product.image.trim().length > 0;
+              const hasValidLink = product.link && product.link.includes('.html');
+              
+              // Accept if we have link + (name OR price OR image)
+              // This ensures we capture products even if name extraction fails
+              if (hasValidLink && (hasValidName || hasValidPrice || hasValidImage)) {
                 products.set(link.href, product);
               }
             } catch (e) {
@@ -1175,7 +1436,6 @@
           const currentCount = products.size;
           log(`Trang ${currentPage}: Tổng ${currentCount}/${maxProducts}`, '📊');
 
-          // Check completion
           if (currentCount >= maxProducts || currentPage >= maxPages) {
             chrome.storage.local.remove(['paginationState']);
             const finalProducts = Array.from(products.values()).slice(0, maxProducts);
@@ -1192,7 +1452,6 @@
             return;
           }
 
-          // Find and click next page
           const nextButton = Utils.findNextPageButton(nextPageSelector);
           if (!nextButton) {
             chrome.storage.local.remove(['paginationState']);

@@ -86,6 +86,7 @@
               sendResponse({ 
                 success: true, 
                 data, 
+                maxProducts: options.maxProducts || null,
                 url: window.location.href, 
                 timestamp: new Date().toISOString() 
               });
@@ -99,6 +100,7 @@
               sendResponse({ 
                 success: true, 
                 data, 
+                maxProducts: options.maxProducts || null,
                 url: window.location.href, 
                 timestamp: new Date().toISOString() 
               });
@@ -108,7 +110,8 @@
             return true; // Keep channel open
             
           case 'productDetail':
-            Scraper.scrapeProductDetail().then(data => {
+            const forceAPI = options?.forceAPI || false;
+            Scraper.scrapeProductDetail(forceAPI).then(data => {
               if (data && (data.sku || data.name)) {
                 const resultData = Array.isArray(data) ? data : [data];
                 sendResponse({ 

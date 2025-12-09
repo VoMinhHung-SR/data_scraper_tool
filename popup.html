@@ -4,251 +4,43 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Data Scraper Tool</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      width: 400px;
-      min-height: 500px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: #333;
-    }
-
-    .container {
-      background: white;
-      margin: 0;
-      padding: 20px;
-      min-height: 500px;
-    }
-
-    .header {
-      text-align: center;
-      margin-bottom: 20px;
-      padding-bottom: 15px;
-      border-bottom: 2px solid #667eea;
-    }
-
-    .header h1 {
-      font-size: 24px;
-      color: #667eea;
-      margin-bottom: 5px;
-    }
-
-    .header .subtitle {
-      font-size: 12px;
-      color: #666;
-    }
-
-    .page-info {
-      background: #f5f5f5;
-      padding: 10px;
-      border-radius: 8px;
-      margin-bottom: 20px;
-      font-size: 12px;
-    }
-
-    .page-info .url {
-      color: #667eea;
-      word-break: break-all;
-      font-weight: 500;
-    }
-
-    .section {
-      margin-bottom: 20px;
-    }
-
-    .section-title {
-      font-size: 14px;
-      font-weight: 600;
-      margin-bottom: 10px;
-      color: #333;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .btn {
-      width: 100%;
-      padding: 12px;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s;
-      margin-bottom: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-    }
-
-    .btn-primary {
-      background: #667eea;
-      color: white;
-    }
-
-    .btn-primary:hover {
-      background: #5568d3;
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-    }
-
-    .btn-secondary {
-      background: #f0f0f0;
-      color: #333;
-    }
-
-    .btn-secondary:hover {
-      background: #e0e0e0;
-    }
-
-    .btn-success {
-      background: #4CAF50;
-      color: white;
-    }
-
-    .btn-success:hover {
-      background: #45a049;
-    }
-
-    .input-group {
-      margin-bottom: 15px;
-    }
-
-    .input-group label {
-      display: block;
-      font-size: 12px;
-      margin-bottom: 5px;
-      color: #666;
-      font-weight: 500;
-    }
-
-    .input-group input,
-    .input-group textarea {
-      width: 100%;
-      padding: 10px;
-      border: 2px solid #e0e0e0;
-      border-radius: 6px;
-      font-size: 13px;
-      transition: border-color 0.3s;
-    }
-
-    .input-group input:focus,
-    .input-group textarea:focus {
-      outline: none;
-      border-color: #667eea;
-    }
-
-    .input-group textarea {
-      resize: vertical;
-      min-height: 80px;
-      font-family: monospace;
-    }
-
-    .result {
-      background: #f9f9f9;
-      border: 1px solid #e0e0e0;
-      border-radius: 8px;
-      padding: 15px;
-      margin-top: 15px;
-      max-height: 200px;
-      overflow-y: auto;
-      font-size: 12px;
-    }
-
-    .result-item {
-      padding: 8px;
-      margin-bottom: 8px;
-      background: white;
-      border-radius: 4px;
-      border-left: 3px solid #667eea;
-    }
-
-    .stats {
-      display: flex;
-      gap: 10px;
-      margin-top: 10px;
-    }
-
-    .stat {
-      flex: 1;
-      text-align: center;
-      padding: 10px;
-      background: #f0f0f0;
-      border-radius: 6px;
-      font-size: 12px;
-    }
-
-    .stat-value {
-      font-size: 20px;
-      font-weight: bold;
-      color: #667eea;
-    }
-
-    .loading {
-      text-align: center;
-      padding: 20px;
-      color: #667eea;
-    }
-
-    .error {
-      background: #ffebee;
-      color: #c62828;
-      padding: 10px;
-      border-radius: 6px;
-      margin-top: 10px;
-      font-size: 12px;
-    }
-
-    .success {
-      background: #e8f5e9;
-      color: #2e7d32;
-      padding: 10px;
-      border-radius: 6px;
-      margin-top: 10px;
-      font-size: 12px;
-    }
-
-    .tabs {
-      display: flex;
-      gap: 5px;
-      margin-bottom: 15px;
-      border-bottom: 2px solid #e0e0e0;
-    }
-
-    .tab {
-      padding: 8px 15px;
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 13px;
-      color: #666;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -2px;
-    }
-
-    .tab.active {
-      color: #667eea;
-      border-bottom-color: #667eea;
-      font-weight: 600;
-    }
-
-    .tab-content {
-      display: none;
-    }
-
-    .tab-content.active {
-      display: block;
-    }
-  </style>
+  <link rel="stylesheet" href="styles/popup.css">
 </head>
 <body>
+  <!-- Custom Modal for Method Selection -->
+  <div class="modal-overlay" id="methodModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span>🚀</span>
+        <h3>Chọn phương thức scrape</h3>
+      </div>
+      <div class="modal-body">
+        <p>Vui lòng chọn phương thức để scrape danh sách sản phẩm:</p>
+        <div class="modal-options">
+          <div class="modal-option" data-method="scroll">
+            <div class="modal-option-icon">📊</div>
+            <div class="modal-option-content">
+              <div class="modal-option-title">Scroll</div>
+              <div class="modal-option-desc">Tự động scroll và click nút "Xem thêm" để load thêm sản phẩm</div>
+            </div>
+            <div class="modal-option-check">✓</div>
+          </div>
+          <div class="modal-option" data-method="pagination">
+            <div class="modal-option-icon">📄</div>
+            <div class="modal-option-content">
+              <div class="modal-option-title">Pagination</div>
+              <div class="modal-option-desc">Tự động chuyển trang bằng nút "Trang sau" hoặc số trang</div>
+            </div>
+            <div class="modal-option-check">✓</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn modal-btn-cancel" id="modalCancel">Hủy</button>
+        <button class="modal-btn modal-btn-confirm" id="modalConfirm">Tiếp tục</button>
+      </div>
+    </div>
+  </div>
   <div class="container">
     <div class="header">
       <h1>📊 Data Scraper</h1>
@@ -259,16 +51,56 @@
       <div class="url">Đang tải...</div>
     </div>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="quick">⚡ Nhanh</button>
-      <button class="tab" data-tab="ecommerce">🛍️ E-commerce</button>
-      <button class="tab" data-tab="custom">⚙️ Tùy chỉnh</button>
+    <!-- Results Modal (shows after scraping completes) -->
+    <div class="modal-overlay" id="resultsModal" style="display: none;">
+      <div class="modal" style="max-width: 500px; max-height: 90vh; overflow-y: auto;">
+        <div class="modal-header">
+          <span>📊</span>
+          <h3>Kết quả scrape</h3>
+          <button class="modal-close" id="closeResultsModal" style="position: absolute; right: 15px; top: 15px; background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="stats" id="stats"></div>
+          <div class="result" id="resultPreview" style="max-height: 300px; overflow-y: auto;"></div>
+        </div>
+        <div class="modal-footer" style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <button class="btn btn-success" id="exportJSON" style="flex: 1; min-width: 120px;">
+            💾 Export JSON
+          </button>
+          <button class="btn btn-success" id="exportCSV" style="flex: 1; min-width: 120px;">
+            📄 Export CSV
+          </button>
+          <button class="btn btn-secondary" id="clearResults" style="flex: 1; min-width: 120px;">
+            🗑️ Xóa kết quả
+          </button>
+        </div>
+      </div>
     </div>
 
-    <!-- Quick Scrape Tab -->
-    <div class="tab-content active" id="quickTab">
+    <!-- Results Section (hidden, kept for backward compatibility) -->
+    <div class="section" id="resultsSection" style="display: none;">
+      <div class="section-title">📊 Kết quả</div>
+      <div class="stats" id="statsOld"></div>
+      <div class="result" id="resultPreviewOld"></div>
+    </div>
+
+    <!-- Message (at top, always visible) -->
+    <div id="message"></div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="general">🌐 General</button>
+      <button class="tab" data-tab="longchau">🏥 Long Châu</button>
+    </div>
+
+    <!-- General Tab - Dùng cho mọi trang web -->
+    <div class="tab-content active" id="generalTab">
       <div class="section">
-        <div class="section-title">📋 Scrape nhanh</div>
+        <div class="section-title">🌐 Scrape chung (Dùng cho mọi trang web)</div>
+        <div style="margin-bottom: 15px; padding: 10px; background: #e3f2fd; border-radius: 6px; font-size: 11px; color: #1976d2;">
+          💡 <strong>General:</strong> Các tính năng này hoạt động trên mọi trang web có bảng dữ liệu, links, hình ảnh.
+        </div>
+        
+        <div class="section-title" style="font-size: 13px; margin-top: 15px;">📋 Scrape nhanh</div>
         <button class="btn btn-primary" id="scrapeTable">
           📊 Scrape Table
         </button>
@@ -278,16 +110,52 @@
         <button class="btn btn-primary" id="scrapeImages">
           🖼️ Scrape Images
         </button>
-        <button class="btn btn-primary" id="scrapeProducts">
-          🛍️ Scrape Products
+
+        <div class="section-title" style="font-size: 13px; margin-top: 20px;">🎯 Scrape tùy chỉnh</div>
+        <div class="input-group">
+          <label>CSS Selector:</label>
+          <input type="text" id="customSelector" placeholder=".product, #content, h1, etc.">
+        </div>
+        <div class="input-group">
+          <label>Lấy thuộc tính (tùy chọn):</label>
+          <input type="text" id="customAttribute" placeholder="href, src, data-id, etc.">
+        </div>
+        <button class="btn btn-primary" id="scrapeCustom">
+          🎯 Scrape
+        </button>
+        <button class="btn btn-secondary" id="highlightSelector">
+          🔍 Highlight Elements
         </button>
       </div>
     </div>
 
-    <!-- E-commerce Tab -->
-    <div class="tab-content" id="ecommerceTab">
+    <!-- Long Châu Tab - Specific cho Long Châu -->
+    <div class="tab-content" id="longchauTab">
       <div class="section">
-        <div class="section-title">🛍️ Scrape sản phẩm E-commerce</div>
+        <div class="section-title">🏥 Scrape sản phẩm Long Châu</div>
+        <div style="margin-bottom: 15px; padding: 10px; background: #fff3e0; border-radius: 6px; font-size: 11px; color: #e65100;">
+          🏥 <strong>Long Châu Specific:</strong> Các tính năng này được tối ưu đặc biệt cho website Long Châu (nhathuoclongchau.com).
+        </div>
+        
+        <!-- Processing Status -->
+        <div id="processingStatus" style="display: none;">
+          <div class="processing-title">🔄 Đang xử lý:</div>
+          <div id="processingText">Chuẩn bị...</div>
+        </div>
+        
+        <div class="section-title" style="font-size: 13px; margin-top: 15px;">🛍️ Scrape danh sách sản phẩm</div>
+        
+        <button class="btn btn-primary" id="scrapeProducts" style="margin-bottom: 15px;">
+          🛍️ Scrape Products (Đơn giản)
+        </button>
+        
+        <div class="input-group">
+          <label>Skip sản phẩm đầu tiên (bỏ qua N sản phẩm đầu):</label>
+          <input type="number" id="skipProducts" value="0" min="0" max="1000" placeholder="0">
+          <div style="font-size: 11px; color: #666; margin-top: 5px;">
+            💡 Ví dụ: Skip 50, Get 100 → sẽ lấy sản phẩm thứ 51-151
+          </div>
+        </div>
         <div class="input-group">
           <label>Số lượng sản phẩm cần scrape:</label>
           <input type="number" id="maxProducts" value="100" min="1" max="1000">
@@ -311,11 +179,17 @@
         </div>
         <div style="display: flex; gap: 5px;">
           <button class="btn btn-primary" id="scrapeManyProducts" style="flex: 1;">
-            📊 Scrape (Scroll + "Xem thêm")
+            📊 Scrape (Scroll)
           </button>
           <button class="btn btn-primary" id="scrapeWithPagination" style="flex: 1; background: #4CAF50;">
             📄 Scrape (Pagination)
           </button>
+        </div>
+        <button class="btn btn-primary" id="scrapeListAndDetails" style="margin-top: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); width: 100%;">
+          🚀 Scrape List + Detail (1 Click)
+        </button>
+        <div style="font-size: 11px; color: #666; margin-top: 5px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
+          💡 <strong>1 Click:</strong> Tự động scrape danh sách sản phẩm, sau đó tự động scrape chi tiết từ các link đã lấy. Tiện lợi và nhanh chóng!
         </div>
         <div class="input-group" style="margin-top: 10px;">
           <label>Load More Button Selector (cho scroll, để trống để tự động tìm):</label>
@@ -328,81 +202,51 @@
         <div class="input-group" style="margin-top: 15px;">
           <label>Scrape chi tiết sản phẩm:</label>
         </div>
+        <div class="input-group" style="margin-top: 10px;">
+          <label>
+            <input type="checkbox" id="forceAPIScraping" style="margin-right: 5px;">
+            Ưu tiên scrape từ API (thay vì DOM)
+          </label>
+          <div style="font-size: 11px; color: #666; margin-top: 5px;">
+            💡 Nếu bật, sẽ cố gắng scrape từ API trước, chỉ fallback về DOM nếu API thất bại
+          </div>
+        </div>
         <button class="btn btn-primary" id="scrapeProductDetail">
           🔍 Scrape Chi Tiết (Trang hiện tại)
         </button>
         <button class="btn btn-primary" id="scrapeDetailsFromList" style="background: #FF9800;">
           📋 Scrape Chi Tiết Từ List (Đã scrape)
         </button>
-        <div style="font-size: 11px; color: #666; margin-top: 5px; padding: 5px; background: #f0f0f0; border-radius: 4px;">
-          💡 <strong>Lưu ý:</strong> "Scrape Chi Tiết Từ List" sẽ tự động mở từng trang sản phẩm và scrape chi tiết. Cần có danh sách sản phẩm đã scrape trước.
-        </div>
-        <div style="margin-top: 15px; border-top: 1px solid #e0e0e0; padding-top: 15px;">
-          <div class="section-title" style="font-size: 13px;">🌐 Scrape từ API (Khuyến nghị)</div>
+        <div style="margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 15px;">
+          <div class="section-title" style="font-size: 13px;">🌐 Scrape từ API Long Châu (Khuyến nghị)</div>
+          <div style="margin-bottom: 10px; padding: 8px; background: #e8f5e9; border-radius: 6px; font-size: 11px; color: #2e7d32;">
+            ✅ <strong>Ưu điểm API:</strong> Dữ liệu chính xác 100%, nhanh hơn, đầy đủ thông tin từ API Long Châu
+          </div>
           <div class="input-group">
-            <label>API URL (để trống để tự động intercept):</label>
+            <label>Category (tự động detect từ URL nếu để trống):</label>
+            <input type="text" id="apiCategory" placeholder="thuc-pham-chuc-nang, duoc-my-pham, thuoc">
+          </div>
+          <button class="btn btn-primary" id="scrapeLongChauAPI" style="background: #2196F3; margin-bottom: 10px;">
+            🏥 Scrape từ Long Châu API
+          </button>
+          <div class="input-group" style="margin-top: 10px;">
+            <label>API URL khác (tùy chọn, để trống để tự động intercept):</label>
             <input type="text" id="apiUrl" placeholder="https://api.example.com/products hoặc để trống">
           </div>
-          <div style="display: flex; gap: 5px;">
-            <button class="btn btn-primary" id="scrapeFromAPI" style="flex: 1; background: #4CAF50;">
-              🌐 Scrape từ API
-            </button>
-            <button class="btn btn-primary" id="scrapeLongChauAPI" style="flex: 1; background: #2196F3;">
-              🏥 Long Châu API
-            </button>
-          </div>
-          <div class="input-group" style="margin-top: 10px;">
-            <label>Category (tự động detect từ URL nếu để trống):</label>
-            <input type="text" id="apiCategory" placeholder="thuc-pham-chuc-nang">
-          </div>
-          <div style="margin-top: 10px; padding: 10px; background: #e8f5e9; border-radius: 6px; font-size: 11px; color: #2e7d32;">
-            ✅ <strong>Ưu điểm:</strong> Dữ liệu chính xác 100%, nhanh hơn, đầy đủ thông tin từ API
-          </div>
+          <button class="btn btn-primary" id="scrapeFromAPI" style="background: #4CAF50;">
+            🌐 Scrape từ API khác
+          </button>
         </div>
         <div style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 6px; font-size: 11px; color: #856404;">
-          💡 <strong>Lưu ý:</strong> Scrape nhiều sản phẩm sẽ tự động scroll trang để tải thêm sản phẩm. Scrape chi tiết chỉ hoạt động trên trang chi tiết sản phẩm.
+          💡 <strong>Lưu ý:</strong> 
+          <ul style="margin: 5px 0 0 20px; padding: 0;">
+            <li>Scrape nhiều sản phẩm sẽ tự động scroll hoặc chuyển trang để tải thêm sản phẩm</li>
+            <li>Scrape chi tiết chỉ hoạt động trên trang chi tiết sản phẩm Long Châu</li>
+            <li>Nên dùng API scraping để có dữ liệu chính xác và nhanh nhất</li>
+          </ul>
         </div>
       </div>
     </div>
-
-    <!-- Custom Scrape Tab -->
-    <div class="tab-content" id="customTab">
-      <div class="section">
-        <div class="section-title">🎯 Scrape tùy chỉnh</div>
-        <div class="input-group">
-          <label>CSS Selector:</label>
-          <input type="text" id="customSelector" placeholder=".product, #content, h1, etc.">
-        </div>
-        <div class="input-group">
-          <label>Lấy thuộc tính (tùy chọn):</label>
-          <input type="text" id="customAttribute" placeholder="href, src, data-id, etc.">
-        </div>
-        <button class="btn btn-primary" id="scrapeCustom">
-          🎯 Scrape
-        </button>
-        <button class="btn btn-secondary" id="highlightSelector">
-          🔍 Highlight Elements
-        </button>
-      </div>
-    </div>
-
-    <!-- Results Section -->
-    <div class="section" id="resultsSection" style="display: none;">
-      <div class="section-title">📊 Kết quả</div>
-      <div class="stats" id="stats"></div>
-      <div class="result" id="resultPreview"></div>
-      <button class="btn btn-success" id="exportJSON">
-        💾 Export JSON
-      </button>
-      <button class="btn btn-success" id="exportCSV">
-        📄 Export CSV
-      </button>
-      <button class="btn btn-secondary" id="clearResults">
-        🗑️ Xóa kết quả
-      </button>
-    </div>
-
-    <div id="message"></div>
   </div>
 
   <!-- Load modules in order -->

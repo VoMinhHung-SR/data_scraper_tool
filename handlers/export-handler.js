@@ -44,6 +44,14 @@
             this.downloadDirectly(content, filename, mimeType, format);
           } else if (response && response.success) {
             window.PopupDisplay.showMessage(`Đã export thành công: ${filename}`, 'success');
+            // Close results modal after successful export
+            setTimeout(() => {
+              const resultsModal = document.getElementById('resultsModal');
+              if (resultsModal) {
+                resultsModal.style.display = 'none';
+                resultsModal.classList.remove('active');
+              }
+            }, 1000);
           } else if (response && response.error === 'FILE_TOO_LARGE') {
             this.downloadDirectly(content, filename, mimeType, format);
           } else if (response && response.error && response.error.includes('USER_CANCELED')) {
@@ -102,6 +110,14 @@
           if (document.body.contains(a)) {
             document.body.removeChild(a);
           }
+          
+          // Close results modal after successful export
+          const resultsModal = document.getElementById('resultsModal');
+          if (resultsModal) {
+            resultsModal.style.display = 'none';
+            resultsModal.classList.remove('active');
+          }
+          window.PopupDisplay.showMessage(`Đã export thành công: ${filename}`, 'success');
           URL.revokeObjectURL(url);
         }, 100);
         
@@ -113,12 +129,105 @@
     },
 
     /**
+     * Normalize product data to API format structure (from api-scraper.js formatProduct)
+     * Base structure: sku, name, webName, slug, link, image, brand, specification, 
+     * shortDescription, category, prices, price, priceDisplay, priceValue, 
+     * productRanking, displayCode, isPublish, categoryPath, categorySlug
+     */
+    normalizeToAPIFormat: function(item) {
+      if (!item || typeof item !== 'object') return item;
+
+      // Check if already in API format (has webName and category as array)
+      const isAPIFormat = item.sku && item.webName && Array.isArray(item.category);
+      if (isAPIFormat) {
+        return item;
+      }
+
+      // Extract price info
+      let priceObj = item.price;
+      let priceDisplay = '';
+      let priceValue = 0;
+      
+      if (priceObj && typeof priceObj === 'object') {
+        priceValue = priceObj.price || priceObj.value || 0;
+        const unit = priceObj.measureUnitName || priceObj.unit || '';
+        const currency = priceObj.currencySymbol || 'đ';
+        priceDisplay = `${priceValue.toLocaleString('vi-VN')}${currency}${unit ? ' / ' + unit : ''}`;
+      } else if (item.prices && Array.isArray(item.prices) && item.prices.length > 0) {
+        priceObj = item.prices[0];
+        priceValue = priceObj.price || 0;
+        const unit = priceObj.measureUnitName || '';
+        const currency = priceObj.currencySymbol || 'đ';
+        priceDisplay = `${priceValue.toLocaleString('vi-VN')}${currency}${unit ? ' / ' + unit : ''}`;
+      } else if (typeof item.price === 'string') {
+        // Parse price string like "131.250đ" or "131.250đ / Hộp"
+        const priceMatch = item.price.match(/([\d.,]+)/);
+        if (priceMatch) {
+          priceValue = parseFloat(priceMatch[1].replace(/\./g, '').replace(',', '.'));
+        }
+        priceDisplay = item.price;
+      }
+
+      // Extract category info
+      let category = item.category || [];
+      let categoryPath = item.categoryPath || '';
+      let categorySlug = item.categorySlug || '';
+      
+      if (!Array.isArray(category) && categoryPath) {
+        // Convert categoryPath to category array
+        category = categoryPath.split(' > ').map(name => ({ name: name.trim() }));
+      }
+      if (Array.isArray(category) && category.length > 0 && !categoryPath) {
+        categoryPath = category.map(c => c.name || c).join(' > ');
+        categorySlug = category.map(c => c.slug || c).join('/');
+      }
+
+      // Extract slug from link/url if not present
+      let slug = item.slug || '';
+      if (!slug && (item.link || item.url)) {
+        const url = item.link || item.url;
+        const match = url.match(/\/([^\/]+)\.html$/);
+        if (match) {
+          slug = match[1];
+        }
+      }
+
+      // Build normalized object following api-scraper.js formatProduct structure
+      const normalized = {
+        sku: item.sku || '',
+        name: item.name || '',
+        webName: item.webName || item.name || '',
+        slug: slug,
+        link: item.link || item.url || (slug ? `https://nhathuoclongchau.com.vn/${slug}` : ''),
+        image: item.image || '',
+        brand: item.brand || '',
+        specification: item.specification || (item.specifications ? JSON.stringify(item.specifications) : ''),
+        shortDescription: item.shortDescription || item.description || '',
+        category: category,
+        prices: item.prices || [],
+        price: priceObj,
+        priceDisplay: priceDisplay,
+        priceValue: priceValue,
+        productRanking: item.productRanking || 0,
+        displayCode: item.displayCode || 1,
+        isPublish: item.isPublish !== undefined ? item.isPublish : true,
+        categoryPath: categoryPath,
+        categorySlug: categorySlug
+      };
+
+      return normalized;
+    },
+
+    /**
      * Convert data to CSV
      */
     convertToCSV: function(data) {
       if (!Array.isArray(data) || data.length === 0) {
         return '';
       }
+
+      // Normalize all items to API format first
+      const normalizedData = data.map(item => this.normalizeToAPIFormat(item));
 
       // Flatten nested objects
       const flattenObject = (obj, prefix = '') => {
@@ -143,14 +252,13 @@
       };
 
       // Flatten all items
-      const flattenedData = data.map(item => {
+      const flattenedData = normalizedData.map(item => {
         if (typeof item === 'object' && item !== null) {
           return flattenObject(item);
         }
         return { value: item };
       });
 
-      // Get all unique keys
       const keys = new Set();
       flattenedData.forEach(item => {
         if (typeof item === 'object' && item !== null) {

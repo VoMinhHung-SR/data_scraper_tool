@@ -4,16 +4,47 @@
   // ============================================
   // 🔧 DOM UTILITIES
   // ============================================
+  // Simple cache for query results (cleared on page navigation)
+  const _queryCache = new Map();
+  const CACHE_MAX_SIZE = 50;
+  
+  // Clear cache when page changes
+  let _lastUrl = window.location.href;
+  const checkUrlChange = () => {
+    if (window.location.href !== _lastUrl) {
+      _queryCache.clear();
+      _lastUrl = window.location.href;
+    }
+  };
+  
   window.DataScraperDOMUtils = {
     /**
-     * Safe query selector
+     * Safe query selector with caching
      * @param {string} selector - CSS selector
      * @param {Element|Document} context - Context element
+     * @param {boolean} useCache - Whether to use cache (default: false for dynamic content)
      * @returns {Element|null}
      */
-    safeQuery: (selector, context = document) => {
+    safeQuery: (selector, context = document, useCache = false) => {
+      checkUrlChange();
+      
+      // Only cache document-level queries (not context-specific)
+      if (useCache && context === document) {
+        const cacheKey = `query:${selector}`;
+        if (_queryCache.has(cacheKey)) {
+          return _queryCache.get(cacheKey);
+        }
+      }
+      
       try {
-        return context.querySelector(selector);
+        const result = context.querySelector(selector);
+        
+        // Cache result if enabled and cache not full
+        if (useCache && context === document && _queryCache.size < CACHE_MAX_SIZE) {
+          _queryCache.set(`query:${selector}`, result);
+        }
+        
+        return result;
       } catch (e) {
         return null;
       }
@@ -23,14 +54,39 @@
      * Safe query selector all
      * @param {string} selector - CSS selector
      * @param {Element|Document} context - Context element
+     * @param {boolean} useCache - Whether to use cache (default: false for dynamic content)
      * @returns {Array<Element>}
      */
-    safeQueryAll: (selector, context = document) => {
+    safeQueryAll: (selector, context = document, useCache = false) => {
+      checkUrlChange();
+      
+      // Only cache document-level queries (not context-specific)
+      if (useCache && context === document) {
+        const cacheKey = `queryAll:${selector}`;
+        if (_queryCache.has(cacheKey)) {
+          return _queryCache.get(cacheKey);
+        }
+      }
+      
       try {
-        return Array.from(context.querySelectorAll(selector));
+        const result = Array.from(context.querySelectorAll(selector));
+        
+        // Cache result if enabled and cache not full
+        if (useCache && context === document && _queryCache.size < CACHE_MAX_SIZE) {
+          _queryCache.set(`queryAll:${selector}`, result);
+        }
+        
+        return result;
       } catch (e) {
         return [];
       }
+    },
+    
+    /**
+     * Clear query cache (useful when DOM changes significantly)
+     */
+    clearCache: () => {
+      _queryCache.clear();
     },
 
     /**
@@ -53,19 +109,41 @@
     findContainer: (containerSelector = null) => {
       if (containerSelector) {
         const container = window.DataScraperDOMUtils.safeQuery(containerSelector);
-        if (container) return container;
+        if (container) {
+          // Verify container has product links inside
+          const hasLinks = container.querySelectorAll('a[href*=".html"]').length > 0;
+          if (hasLinks) return container;
+          // If no links, try to find a better container
+        }
       }
 
-      // Auto-detect grid containers
+      // Auto-detect grid containers - try more specific selectors first
       const gridSelectors = [
         '.grid.grid-cols-2',
+        '.grid[class*="grid-cols-2"]',
         '.grid[class*="grid-cols"]',
-        '[class*="grid"][class*="gap"]'
+        '[class*="grid"][class*="grid-cols"]',
+        '[class*="grid"][class*="gap"]',
+        '.grid'
       ];
       
       for (const sel of gridSelectors) {
-        const container = window.DataScraperDOMUtils.safeQuery(sel);
-        if (container) return container;
+        const containers = window.DataScraperDOMUtils.safeQueryAll(sel);
+        // Find container with most product links
+        let bestContainer = null;
+        let maxLinks = 0;
+        
+        for (const container of containers) {
+          const linkCount = container.querySelectorAll('a[href*=".html"]').length;
+          if (linkCount > maxLinks) {
+            maxLinks = linkCount;
+            bestContainer = container;
+          }
+        }
+        
+        if (bestContainer && maxLinks > 0) {
+          return bestContainer;
+        }
       }
       
       return document.body;

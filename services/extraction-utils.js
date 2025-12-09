@@ -4,6 +4,11 @@
   // ============================================
   // 🎯 EXTRACTION UTILITIES
   // ============================================
+  // Cache for category extraction (avoid redundant DOM queries)
+  let _categoryCache = null;
+  let _categoryCacheTimestamp = 0;
+  const CATEGORY_CACHE_TTL = 5000; // 5 seconds cache
+  
   window.DataScraperExtractionUtils = {
     /**
      * Extract product info from element
@@ -13,7 +18,32 @@
      */
     extractProductInfo: (item, link) => {
       const DOMUtils = window.DataScraperDOMUtils;
-      const card = item.tagName !== 'A' ? item : item.closest('div, article, li, section') || item;
+      
+      // Find the best card container
+      // If item is already a card-like element, use it
+      // Otherwise, find the closest container that likely contains product info
+      let card = item;
+      
+      if (item.tagName === 'A') {
+        // If item is a link, find its parent container (product card)
+        // For grid layouts, product card is usually the direct parent or grandparent
+        const parent = item.parentElement;
+        const grandParent = parent?.parentElement;
+        
+        // Check if parent is a direct child of a grid container
+        if (parent && parent.parentElement && 
+            (parent.parentElement.classList.toString().includes('grid') ||
+             parent.parentElement.classList.toString().includes('grid-cols'))) {
+          card = parent;
+        } else if (parent) {
+          card = parent;
+        } else {
+          card = item.closest('div, article, li, section') || item;
+        }
+      } else {
+        // If item is not a link, it might already be the card
+        card = item;
+      }
       
       // Extract name
       const name = window.DataScraperExtractionUtils.extractName(card, link);
@@ -43,14 +73,85 @@
       const heading = DOMUtils.safeQuery('h1, h2, h3, h4, h5, h6', card);
       let name = heading ? DOMUtils.getText(heading) : '';
       
+      // Try product name selectors
+      if (!name) {
+        const nameSelectors = [
+          '[class*="product-name"]',
+          '[class*="product-title"]',
+          '[data-test-id="product-name"]',
+          'div[class*="name"]',
+          'span[class*="name"]'
+        ];
+        for (const sel of nameSelectors) {
+          const nameEl = DOMUtils.safeQuery(sel, card);
+          if (nameEl) {
+            const nameText = DOMUtils.getText(nameEl).trim();
+            if (nameText && nameText.length > 5) {
+              name = nameText.split('\n')[0].trim();
+              break;
+            }
+          }
+        }
+      }
+      
       // Fallback: extract from link text
       if (!name && link) {
         const linkText = DOMUtils.getText(link);
         const lines = linkText.split('\n').map(l => l.trim()).filter(l => l);
-        name = lines[0]?.replace(/\d+\.?\d*\s*[₫đ]/g, '').trim() || '';
+        // Try to find the longest line that looks like a product name
+        for (const line of lines) {
+          const cleanLine = line.replace(/\d+\.?\d*\s*[₫đ]/g, '').trim();
+          if (cleanLine.length > 5 && !cleanLine.match(/^(Chọn|Mua|Xem|Thêm)/i)) {
+            name = cleanLine;
+            break;
+          }
+        }
+        // If still no name, use first line
+        if (!name && lines.length > 0) {
+          name = lines[0]?.replace(/\d+\.?\d*\s*[₫đ]/g, '').trim() || '';
+        }
+      }
+      
+      // Final fallback: extract from card text (find longest text that doesn't look like price/button)
+      if (!name || name.length < 3) {
+        const cardText = DOMUtils.getText(card);
+        const lines = cardText.split('\n').map(l => l.trim()).filter(l => l && l.length > 5);
+        
+        // For /thuoc/ pages, product name is usually the first substantial line
+        // that contains product name keywords and doesn't look like price/button
+        for (const line of lines) {
+          // Skip if it looks like price, button text, category, or package info
+          if (!line.match(/^\d+[.,]?\d*\s*[₫đ]/) && 
+              !line.match(/^(Chọn|Mua|Xem|Thêm|Tư vấn)/i) &&
+              !line.match(/^Trang\s+chủ/i) &&
+              !line.match(/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*\d+/i) &&
+              !line.match(/^\d+\s*(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)/i)) {
+            // For /thuoc/ pages, product names often start with "Thuốc" or contain product keywords
+            if (line.match(/^(Thuốc|Gel|Viên|Kem|Dung dịch|Nước|Bột)/i) || 
+                line.length > 10) {
+              name = line;
+              break;
+            }
+          }
+        }
+        
+        // If still no name, try to find the longest line that looks like a product name
+        if (!name || name.length < 3) {
+          let longestLine = '';
+          for (const line of lines) {
+            if (line.length > longestLine.length && 
+                !line.match(/^\d+[.,]?\d*\s*[₫đ]/) && 
+                !line.match(/^(Chọn|Mua|Xem|Thêm|Tư vấn|Hộp|Gói|Vỉ)/i)) {
+              longestLine = line;
+            }
+          }
+          if (longestLine.length > 5) {
+            name = longestLine;
+          }
+        }
       }
 
-      return name;
+      return name || '';
     },
 
     /**
@@ -161,6 +262,112 @@
       }
 
       return packageInfo;
+    },
+
+    /**
+     * Extract category from breadcrumb on list pages
+     * @param {boolean} useCache - Whether to use cached result (default: true)
+     * @returns {{category: Array, categoryPath: string, categorySlug: string}}
+     */
+    extractCategoryFromBreadcrumb: (useCache = true) => {
+      // Return cached result if available and fresh
+      if (useCache && _categoryCache && (Date.now() - _categoryCacheTimestamp) < CATEGORY_CACHE_TTL) {
+        return _categoryCache;
+      }
+      
+      const DOMUtils = window.DataScraperDOMUtils;
+      let categoryPath = '';
+      let categorySlug = '';
+      let category = [];
+      
+      // Try category breadcrumb first (for list pages)
+      const categoryBreadcrumb = DOMUtils.safeQuery('[data-lcpr="prr-id-category-breadcrumb"]') ||
+                                  DOMUtils.safeQuery('ol[class*="breadcrumb"]') ||
+                                  DOMUtils.safeQuery('[class*="breadcrumb"]');
+      
+      if (categoryBreadcrumb) {
+        const breadcrumbLinks = DOMUtils.safeQueryAll('a', categoryBreadcrumb);
+        if (breadcrumbLinks.length > 0) {
+          // Extract category path and slugs from breadcrumb links
+          const categoryNames = [];
+          const categorySlugs = [];
+          
+          breadcrumbLinks.forEach(link => {
+            const linkText = DOMUtils.getText(link).trim();
+            const linkHref = link.href || '';
+            
+            // Skip "Trang chủ" (Homepage)
+            if (linkText && !linkText.match(/trang\s+chủ|homepage/i)) {
+              categoryNames.push(linkText);
+              
+              // Extract slug from href - flexible for any category path
+              if (linkHref) {
+                // Extract all path segments (not just specific categories)
+                // Pattern: /category1/category2/category3/...
+                const urlObj = new URL(linkHref);
+                const pathSegments = urlObj.pathname.split('/').filter(p => p && !p.includes('.html') && !p.includes('.'));
+                
+                if (pathSegments.length > 0) {
+                  // Use the last segment as slug (or all segments for nested categories)
+                  categorySlugs.push(pathSegments[pathSegments.length - 1]);
+                } else {
+                  // Fallback: extract from URL path
+                  const pathMatch = linkHref.match(/\/([^\/]+)\/?$/);
+                  if (pathMatch && !pathMatch[1].includes('.')) {
+                    categorySlugs.push(pathMatch[1]);
+                  }
+                }
+              }
+            }
+          });
+          
+          if (categoryNames.length > 0) {
+            categoryPath = categoryNames.join(' > ');
+            categorySlug = categorySlugs.join('/');
+            category = categoryNames.map((name, idx) => ({
+              name: name,
+              slug: categorySlugs[idx] || ''
+            }));
+          }
+        } else {
+          // Fallback: extract from breadcrumb text
+          const breadcrumbText = DOMUtils.getText(categoryBreadcrumb);
+          if (breadcrumbText) {
+            const parts = breadcrumbText.split('/').map(p => p.trim()).filter(p => p && !p.match(/trang\s+chủ|homepage/i));
+            if (parts.length > 0) {
+              categoryPath = parts.join(' > ');
+              category = parts.map(name => ({ name: name, slug: '' }));
+            }
+          }
+        }
+      }
+      
+      // Fallback: extract from URL - flexible for any category path
+      if (!categoryPath && window.location.pathname) {
+        const pathParts = window.location.pathname.split('/').filter(p => p && !p.includes('.html') && !p.includes('.'));
+        if (pathParts.length > 0) {
+          // Use all path parts as category (no filtering - accept any category)
+          categoryPath = pathParts.join(' > ');
+          categorySlug = pathParts.join('/');
+          category = pathParts.map(name => ({ name: name, slug: name }));
+        }
+      }
+      
+      const result = { category, categoryPath, categorySlug };
+      
+      // Cache the result
+      _categoryCache = result;
+      _categoryCacheTimestamp = Date.now();
+      
+      return result;
+    },
+    
+    /**
+     * Clear category cache (useful when navigating to new page)
+     */
+    clearCategoryCache: () => {
+      _categoryCache = null;
+      _categoryCacheTimestamp = 0;
     },
 
     /**

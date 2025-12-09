@@ -41,10 +41,13 @@
       }
 
       if (response?.success) {
+        // Use setData which auto-detects type
         window.PopupState.setData(response.data);
-        window.PopupDisplay.displayResults(response.data);
+        window.PopupDisplay.displayResults(response.data, { maxProducts: response.maxProducts || null });
         const count = Array.isArray(response.data) ? response.data.length : 1;
-        window.PopupDisplay.showMessage(`Đã scrape thành công ${count} items`, 'success');
+        const maxProducts = response.maxProducts || null;
+        const countDisplay = maxProducts ? `${count}/${maxProducts}` : `${count}`;
+        window.PopupDisplay.showMessage(`Đã scrape thành công ${countDisplay} items`, 'success');
       } else {
         window.PopupDisplay.showMessage('Lỗi: ' + (response?.error || 'Unknown error'), 'error');
       }

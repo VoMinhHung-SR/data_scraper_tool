@@ -186,9 +186,59 @@
         chrome.storage.local.remove([
           window.DataScraperStateManager.KEYS.PAGINATION,
           window.DataScraperStateManager.KEYS.DETAIL_LIST,
-          window.DataScraperStateManager.KEYS.API_CACHE
+          window.DataScraperStateManager.KEYS.API_CACHE,
+          'scrapeDetailsState',
+          'paginationState',
+          'scraper_detail_data',
+          'scraper_list_data',
+          'lastProductDetailAPI'
         ], () => {
           resolve();
+        });
+      });
+    },
+    
+    /**
+     * Cleanup old states (older than maxAge)
+     * @param {number} maxAge - Maximum age in milliseconds (default: 1 hour)
+     * @returns {Promise<number>} Number of states cleaned up
+     */
+    cleanupOldStates: (maxAge = 60 * 60 * 1000) => {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(null, (items) => {
+          const now = Date.now();
+          const keysToRemove = [];
+          
+          // Check all scraper-related keys
+          Object.keys(items).forEach(key => {
+            if (key.startsWith('scraper:') || 
+                key === 'scrapeDetailsState' || 
+                key === 'paginationState' ||
+                key === 'lastProductDetailAPI') {
+              const item = items[key];
+              // Check if item has timestamp and is old
+              if (item && typeof item === 'object' && item.timestamp) {
+                const age = now - item.timestamp;
+                if (age > maxAge) {
+                  keysToRemove.push(key);
+                }
+              } else if (item && typeof item === 'object' && item.startedAt) {
+                // Check startedAt for scrapeDetailsState
+                const age = now - item.startedAt;
+                if (age > maxAge) {
+                  keysToRemove.push(key);
+                }
+              }
+            }
+          });
+          
+          if (keysToRemove.length > 0) {
+            chrome.storage.local.remove(keysToRemove, () => {
+              resolve(keysToRemove.length);
+            });
+          } else {
+            resolve(0);
+          }
         });
       });
     }

@@ -1,9 +1,6 @@
 (() => {
   'use strict';
 
-  // ============================================
-  // 💾 EXPORT HANDLER
-  // ============================================
   window.DataScraperExportHandler = {
     /**
      * Export data
@@ -40,11 +37,9 @@
           mimeType: mimeType
         }, (response) => {
           if (chrome.runtime.lastError) {
-            console.error('Download error:', chrome.runtime.lastError);
             this.downloadDirectly(content, filename, mimeType, format);
           } else if (response && response.success) {
             window.PopupDisplay.showMessage(`Đã export thành công: ${filename}`, 'success');
-            // Close results modal after successful export
             setTimeout(() => {
               const resultsModal = document.getElementById('resultsModal');
               if (resultsModal) {
@@ -55,14 +50,12 @@
           } else if (response && response.error === 'FILE_TOO_LARGE') {
             this.downloadDirectly(content, filename, mimeType, format);
           } else if (response && response.error && response.error.includes('USER_CANCELED')) {
-            // User canceled - silently ignore
             return;
           } else {
             window.PopupDisplay.showMessage('Lỗi khi export: ' + (response?.error || 'Unknown error'), 'error');
           }
         });
       } catch (error) {
-        console.error('Export error:', error);
         window.PopupDisplay.showMessage('Lỗi khi export: ' + error.message, 'error');
       }
     },
@@ -111,7 +104,6 @@
             document.body.removeChild(a);
           }
           
-          // Close results modal after successful export
           const resultsModal = document.getElementById('resultsModal');
           if (resultsModal) {
             resultsModal.style.display = 'none';
@@ -123,31 +115,30 @@
         
         window.PopupDisplay.showMessage(`Đã export thành công: ${filename}`, 'success');
       } catch (error) {
-        console.error('Direct download error:', error);
         window.PopupDisplay.showMessage('Lỗi khi export: ' + error.message, 'error');
       }
     },
 
     /**
      * Normalize product data to unified detail format structure
-     * Format thống nhất cho cả API và DOM scraping (giống DOM scraping format)
-     * Base structure: name, sku, brand, price, packageSize, rating, reviewCount, 
-     * commentCount, reviews, category, categoryPath, categorySlug, image, images,
-     * description, ingredient, usage, dosage, adverseEffect, careful, preservation,
-     * registrationNumber, origin, manufacturer, shelfLife, ingredients, specifications, url, source
      */
     normalizeToAPIFormat: function(item) {
       if (!item || typeof item !== 'object') return item;
 
-      // Check if already in unified detail format (has specifications as object and description field)
-      const isUnifiedFormat = item.sku && 
-                              (item.description !== undefined || item.ingredient !== undefined) &&
-                              (typeof item.specifications === 'object' || item.specifications === null);
-      if (isUnifiedFormat) {
+      const isGroupedFormat = item.basicInfo || item.pricing || item.rating || item.category || item.media || item.content || item.specifications || item.metadata;
+      if (isGroupedFormat) {
         return item;
       }
-
-      // Extract price info
+      const isUnifiedFormat = item.sku && 
+                              (item.description !== undefined || item.ingredients !== undefined) &&
+                              (typeof item.specifications === 'object' || item.specifications === null);
+      if (isUnifiedFormat) {
+        const ProductFormatter = window.DataScraperProductFormatter;
+        if (ProductFormatter) {
+          return ProductFormatter.formatProductDetail(item);
+        }
+        return item;
+      }
       let priceObj = item.price;
       let priceDisplay = '';
       let priceValue = 0;
@@ -234,8 +225,8 @@
       if (!specifications['Quy cách'] && item.packageSize) {
         specifications['Quy cách'] = item.packageSize;
       }
-      if (!specifications['Thành phần'] && item.ingredient) {
-        specifications['Thành phần'] = item.ingredient;
+      if (!specifications['Thành phần'] && item.ingredients) {
+        specifications['Thành phần'] = item.ingredients;
       }
 
       // Extract package size
@@ -275,7 +266,7 @@
         
         // Các section từ detail-content-* (giống DOM scraping)
         description: item.description || item.fullDescription || item.shortDescription || '',
-        ingredient: item.ingredient || item.ingredients || specifications['Thành phần'] || '',
+        ingredients: item.ingredients || specifications['Thành phần'] || '',
         usage: item.usage || item.indications || '',
         dosage: item.dosage || '',
         adverseEffect: item.adverseEffect || item.contraindications || '',
@@ -287,7 +278,6 @@
         origin: specifications['Xuất xứ thương hiệu'] || item.origin || '',
         manufacturer: specifications['Nhà sản xuất'] || item.manufacturer || '',
         shelfLife: specifications['Hạn sử dụng'] || item.shelfLife || '',
-        ingredients: item.ingredient || item.ingredients || specifications['Thành phần'] || '',
         
         // Specifications object (gom nhóm)
         specifications: specifications,

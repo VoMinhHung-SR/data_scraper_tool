@@ -21,6 +21,7 @@
         "services/extraction-utils.js",
         "services/state-manager.js",
         "services/progress-indicator.js",
+        "services/product-formatter.js",
         "utils.js",
         "core/api-scraper.js",
         "core/base-scraper.js",

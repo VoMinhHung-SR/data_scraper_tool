@@ -175,46 +175,164 @@
     },
 
     // Format product detail từ API response
+    // Cấu trúc giống với DOM scraping để export thống nhất "1 click"
     formatProductDetail: (product) => {
       if (!product?.sku) return null;
 
+      // Extract price info
+      let priceObj = product.price;
+      let priceDisplay = '';
+      let priceValue = 0;
+      
+      if (priceObj && typeof priceObj === 'object') {
+        priceValue = priceObj.price || priceObj.value || 0;
+        const unit = priceObj.measureUnitName || priceObj.unit || '';
+        const currency = priceObj.currencySymbol || 'đ';
+        priceDisplay = `${priceValue.toLocaleString('vi-VN')}${currency}${unit ? ' / ' + unit : ''}`;
+      } else if (product.prices?.length > 0) {
+        priceObj = product.prices[0];
+        priceValue = priceObj.price || 0;
+        const unit = priceObj.measureUnitName || '';
+        const currency = priceObj.currencySymbol || 'đ';
+        priceDisplay = `${priceValue.toLocaleString('vi-VN')}${currency}${unit ? ' / ' + unit : ''}`;
+      } else if (product.priceDisplay) {
+        priceDisplay = product.priceDisplay;
+        priceValue = product.priceValue || 0;
+      }
+
+      // Extract category info
+      const category = Array.isArray(product.category) ? product.category : [];
+      const categoryPath = category.length > 0 
+        ? category.map(c => c.name || c).join(' > ') 
+        : (product.categoryPath || '');
+      const categorySlug = category.length > 0
+        ? category.map(c => c.slug || c).join('/')
+        : (product.categorySlug || '');
+
+      // Extract images
+      const mainImage = product.image || product.mainImage || '';
+      const images = Array.isArray(product.images) 
+        ? product.images 
+        : (Array.isArray(product.gallery) ? product.gallery : (mainImage ? [mainImage] : []));
+
+      // Gom nhóm specifications thành object (giống DOM scraping)
+      const specifications = {};
+      
+      // Extract từ các field riêng lẻ vào specifications object
+      if (product.registrationNumber || product.registration) {
+        specifications['Số đăng ký'] = product.registrationNumber || product.registration;
+      }
+      if (product.origin || product.country) {
+        specifications['Xuất xứ thương hiệu'] = product.origin || product.country;
+      }
+      if (product.manufacturer || product.manufacturerName) {
+        specifications['Nhà sản xuất'] = product.manufacturer || product.manufacturerName;
+      }
+      if (product.shelfLife || product.expiryDate) {
+        specifications['Hạn sử dụng'] = product.shelfLife || product.expiryDate;
+      }
+      if (product.packaging || product.packageSize) {
+        specifications['Quy cách'] = product.packaging || product.packageSize;
+      }
+      if (product.specification) {
+        // Nếu specification là string, có thể parse hoặc giữ nguyên
+        try {
+          const specObj = typeof product.specification === 'string' 
+            ? JSON.parse(product.specification) 
+            : product.specification;
+          if (typeof specObj === 'object' && specObj !== null) {
+            Object.assign(specifications, specObj);
+          } else {
+            specifications['Thông số kỹ thuật'] = product.specification;
+          }
+        } catch (e) {
+          specifications['Thông số kỹ thuật'] = product.specification;
+        }
+      }
+
+      // Extract package size từ specifications hoặc packaging
+      const packageSize = specifications['Quy cách'] || product.packaging || product.packageSize || '';
+
+      // Extract rating và reviews
+      const rating = product.rating || product.averageRating || '';
+      const reviewCount = product.reviewCount || product.totalReviews || '';
+      const commentCount = product.commentCount || product.totalComments || '';
+      const reviews = reviewCount && commentCount 
+        ? `${reviewCount} đánh giá, ${commentCount} bình luận` 
+        : '';
+
+      // Extract các section (giống DOM scraping)
+      const description = product.fullDescription || product.shortDescription || product.description || product.content || '';
+      const ingredient = product.ingredients || product.composition || specifications['Thành phần'] || '';
+      const usage = product.indications || product.uses || '';
+      const dosage = product.dosage || product.usage || '';
+      const adverseEffect = product.contraindications || product.warnings || '';
+      const careful = ''; // API không có field này, để trống
+      const preservation = product.storage || '';
+
+      // Build link
+      const slug = product.slug || '';
+      const link = slug ? `https://nhathuoclongchau.com.vn/${slug}` : '';
+      const url = link || window.location.href;
+
+      // Return format giống DOM scraping để export thống nhất
       return {
-        sku: product.sku || '',
-        name: product.name || product.webName || '',
-        webName: product.webName || product.name || '',
-        slug: product.slug || '',
-        link: product.slug ? `https://nhathuoclongchau.com.vn/${product.slug}` : '',
-        image: product.image || product.mainImage || '',
-        images: product.images || product.gallery || [],
-        brand: product.brand || product.brandName || '',
-        specification: product.specification || '',
-        shortDescription: product.shortDescription || product.description || '',
-        fullDescription: product.fullDescription || product.content || product.description || '',
-        category: product.category || [],
-        categoryPath: product.category?.map(c => c.name || c).join(' > ') || '',
-        categorySlug: product.category?.map(c => c.slug || c).join('/') || '',
-        prices: product.prices || [],
-        price: product.price || null,
-        priceDisplay: product.priceDisplay || '',
-        priceValue: product.priceValue || 0,
-        registrationNumber: product.registrationNumber || product.registration || '',
-        origin: product.origin || product.country || '',
-        manufacturer: product.manufacturer || product.manufacturerName || '',
-        shelfLife: product.shelfLife || product.expiryDate || '',
-        ingredients: product.ingredients || product.composition || '',
-        indications: product.indications || product.uses || '',
-        dosage: product.dosage || product.usage || '',
-        contraindications: product.contraindications || product.warnings || '',
-        storage: product.storage || '',
-        packaging: product.packaging || product.packageSize || '',
-        rating: product.rating || product.averageRating || '',
-        reviewCount: product.reviewCount || product.totalReviews || '',
-        commentCount: product.commentCount || product.totalComments || '',
-        productRanking: product.productRanking || 0,
-        isPublish: product.isPublish !== undefined ? product.isPublish : true,
-        url: product.slug ? `https://nhathuoclongchau.com.vn/${product.slug}` : window.location.href,
+        // Thông tin cơ bản
+        name: (product.name || product.webName || '').trim(),
+        sku: (product.sku || '').trim(),
+        brand: (product.brand || product.brandName || '').trim(),
+        price: priceDisplay.trim(),
+        packageSize: packageSize.trim(),
+        
+        // Rating và reviews
+        rating: String(rating || '').trim(),
+        reviewCount: String(reviewCount || '').trim(),
+        commentCount: String(commentCount || '').trim(),
+        reviews: reviews.trim(),
+        
+        // Category
+        category: category,
+        categoryPath: categoryPath.trim(),
+        categorySlug: categorySlug.trim(),
+        
+        // Images
+        image: mainImage.trim(),
+        images: images.filter(img => img && typeof img === 'string' && img.trim()),
+        
+        // Các section từ detail-content-* (giống DOM scraping)
+        description: description.trim(),
+        ingredient: ingredient.trim(),
+        usage: usage.trim(),
+        dosage: dosage.trim(),
+        adverseEffect: adverseEffect.trim(),
+        careful: careful.trim(),
+        preservation: preservation.trim(),
+        
+        // Thông tin bổ sung
+        registrationNumber: (specifications['Số đăng ký'] || '').trim(),
+        origin: (specifications['Xuất xứ thương hiệu'] || '').trim(),
+        manufacturer: (specifications['Nhà sản xuất'] || '').trim(),
+        shelfLife: (specifications['Hạn sử dụng'] || '').trim(),
+        ingredients: ingredient.trim(), // Alias cho ingredient
+        
+        // Specifications object (gom nhóm giống DOM scraping)
+        specifications: specifications,
+        
+        // Metadata
+        url: url.trim(),
+        link: link.trim(),
         scrapedAt: new Date().toISOString(),
-        source: 'API'
+        source: 'API',
+        
+        // Additional fields từ API (giữ lại để tương thích)
+        webName: product.webName || product.name || '',
+        slug: slug,
+        prices: product.prices || [],
+        priceObj: priceObj,
+        priceValue: priceValue,
+        productRanking: product.productRanking || 0,
+        displayCode: product.displayCode || 1,
+        isPublish: product.isPublish !== undefined ? product.isPublish : true
       };
     }
   };

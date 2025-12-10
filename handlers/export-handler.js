@@ -129,17 +129,21 @@
     },
 
     /**
-     * Normalize product data to API format structure (from api-scraper.js formatProduct)
-     * Base structure: sku, name, webName, slug, link, image, brand, specification, 
-     * shortDescription, category, prices, price, priceDisplay, priceValue, 
-     * productRanking, displayCode, isPublish, categoryPath, categorySlug
+     * Normalize product data to unified detail format structure
+     * Format thống nhất cho cả API và DOM scraping (giống DOM scraping format)
+     * Base structure: name, sku, brand, price, packageSize, rating, reviewCount, 
+     * commentCount, reviews, category, categoryPath, categorySlug, image, images,
+     * description, ingredient, usage, dosage, adverseEffect, careful, preservation,
+     * registrationNumber, origin, manufacturer, shelfLife, ingredients, specifications, url, source
      */
     normalizeToAPIFormat: function(item) {
       if (!item || typeof item !== 'object') return item;
 
-      // Check if already in API format (has webName and category as array)
-      const isAPIFormat = item.sku && item.webName && Array.isArray(item.category);
-      if (isAPIFormat) {
+      // Check if already in unified detail format (has specifications as object and description field)
+      const isUnifiedFormat = item.sku && 
+                              (item.description !== undefined || item.ingredient !== undefined) &&
+                              (typeof item.specifications === 'object' || item.specifications === null);
+      if (isUnifiedFormat) {
         return item;
       }
 
@@ -192,27 +196,117 @@
         }
       }
 
-      // Build normalized object following api-scraper.js formatProduct structure
+      // Gom nhóm specifications thành object (giống format thống nhất)
+      let specifications = {};
+      
+      // Nếu đã có specifications object, dùng nó
+      if (item.specifications && typeof item.specifications === 'object') {
+        specifications = item.specifications;
+      } else if (item.specification) {
+        // Nếu specification là string, thử parse hoặc giữ nguyên
+        try {
+          const specObj = typeof item.specification === 'string' 
+            ? JSON.parse(item.specification) 
+            : item.specification;
+          if (typeof specObj === 'object' && specObj !== null) {
+            specifications = specObj;
+          } else {
+            specifications['Thông số kỹ thuật'] = item.specification;
+          }
+        } catch (e) {
+          specifications['Thông số kỹ thuật'] = item.specification;
+        }
+      }
+      
+      // Extract các field riêng lẻ vào specifications nếu chưa có
+      if (!specifications['Số đăng ký'] && item.registrationNumber) {
+        specifications['Số đăng ký'] = item.registrationNumber;
+      }
+      if (!specifications['Xuất xứ thương hiệu'] && item.origin) {
+        specifications['Xuất xứ thương hiệu'] = item.origin;
+      }
+      if (!specifications['Nhà sản xuất'] && item.manufacturer) {
+        specifications['Nhà sản xuất'] = item.manufacturer;
+      }
+      if (!specifications['Hạn sử dụng'] && item.shelfLife) {
+        specifications['Hạn sử dụng'] = item.shelfLife;
+      }
+      if (!specifications['Quy cách'] && item.packageSize) {
+        specifications['Quy cách'] = item.packageSize;
+      }
+      if (!specifications['Thành phần'] && item.ingredient) {
+        specifications['Thành phần'] = item.ingredient;
+      }
+
+      // Extract package size
+      const packageSize = item.packageSize || specifications['Quy cách'] || '';
+
+      // Extract rating và reviews
+      const rating = item.rating || '';
+      const reviewCount = item.reviewCount || '';
+      const commentCount = item.commentCount || '';
+      const reviews = reviewCount && commentCount 
+        ? `${reviewCount} đánh giá, ${commentCount} bình luận` 
+        : '';
+
+      // Build normalized object following unified detail format (giống DOM scraping)
       const normalized = {
-        sku: item.sku || '',
+        // Thông tin cơ bản
         name: item.name || '',
+        sku: item.sku || '',
+        brand: item.brand || '',
+        price: priceDisplay || item.price || '',
+        packageSize: packageSize,
+        
+        // Rating và reviews
+        rating: String(rating),
+        reviewCount: String(reviewCount),
+        commentCount: String(commentCount),
+        reviews: reviews,
+        
+        // Category
+        category: category,
+        categoryPath: categoryPath,
+        categorySlug: categorySlug,
+        
+        // Images
+        image: item.image || '',
+        images: Array.isArray(item.images) ? item.images : (item.image ? [item.image] : []),
+        
+        // Các section từ detail-content-* (giống DOM scraping)
+        description: item.description || item.fullDescription || item.shortDescription || '',
+        ingredient: item.ingredient || item.ingredients || specifications['Thành phần'] || '',
+        usage: item.usage || item.indications || '',
+        dosage: item.dosage || '',
+        adverseEffect: item.adverseEffect || item.contraindications || '',
+        careful: item.careful || '',
+        preservation: item.preservation || item.storage || '',
+        
+        // Thông tin bổ sung
+        registrationNumber: specifications['Số đăng ký'] || item.registrationNumber || '',
+        origin: specifications['Xuất xứ thương hiệu'] || item.origin || '',
+        manufacturer: specifications['Nhà sản xuất'] || item.manufacturer || '',
+        shelfLife: specifications['Hạn sử dụng'] || item.shelfLife || '',
+        ingredients: item.ingredient || item.ingredients || specifications['Thành phần'] || '',
+        
+        // Specifications object (gom nhóm)
+        specifications: specifications,
+        
+        // Metadata
+        url: item.url || item.link || (slug ? `https://nhathuoclongchau.com.vn/${slug}` : ''),
+        link: item.link || item.url || (slug ? `https://nhathuoclongchau.com.vn/${slug}` : ''),
+        scrapedAt: item.scrapedAt || new Date().toISOString(),
+        source: item.source || 'UNKNOWN',
+        
+        // Additional fields (giữ lại để tương thích)
         webName: item.webName || item.name || '',
         slug: slug,
-        link: item.link || item.url || (slug ? `https://nhathuoclongchau.com.vn/${slug}` : ''),
-        image: item.image || '',
-        brand: item.brand || '',
-        specification: item.specification || (item.specifications ? JSON.stringify(item.specifications) : ''),
-        shortDescription: item.shortDescription || item.description || '',
-        category: category,
         prices: item.prices || [],
-        price: priceObj,
-        priceDisplay: priceDisplay,
+        priceObj: priceObj,
         priceValue: priceValue,
         productRanking: item.productRanking || 0,
         displayCode: item.displayCode || 1,
-        isPublish: item.isPublish !== undefined ? item.isPublish : true,
-        categoryPath: categoryPath,
-        categorySlug: categorySlug
+        isPublish: item.isPublish !== undefined ? item.isPublish : true
       };
 
       return normalized;

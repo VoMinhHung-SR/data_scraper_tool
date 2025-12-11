@@ -183,7 +183,33 @@
     clear: function() {
       this.currentListData = null;
       this.currentDetailData = null;
-      chrome.storage.local.remove([this.STORAGE_KEY_LIST, this.STORAGE_KEY_DETAIL]);
+      
+      // Clear all scraper-related states
+      const keysToRemove = [
+        this.STORAGE_KEY_LIST,
+        this.STORAGE_KEY_DETAIL,
+        'scrapeDetailsState',  // State for productDetailsFromList scraping
+        'paginationState',     // State for pagination scraping
+        'lastProductDetailAPI' // Cached API response
+      ];
+      
+      chrome.storage.local.remove(keysToRemove, () => {
+        // Also clear states managed by DataScraperStateManager
+        if (window.DataScraperStateManager && window.DataScraperStateManager.clearAll) {
+          window.DataScraperStateManager.clearAll();
+        }
+      });
+      
+      // Clear badge in background script
+      if (this.currentTab && this.currentTab.id) {
+        chrome.runtime.sendMessage({
+          action: 'clearBadge',
+          tabId: this.currentTab.id
+        }).catch(() => {
+          // Background script might not be ready, ignore
+        });
+      }
+      
       if (this.messageTimeout) {
         clearTimeout(this.messageTimeout);
         this.messageTimeout = null;

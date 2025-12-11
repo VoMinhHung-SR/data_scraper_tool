@@ -163,6 +163,15 @@
       if (sender?.tab?.id) showDoneBadge(sender.tab.id);
       return false;
     }
+
+    if (request.action === 'clearBadge') {
+      const tabId = request.tabId || sender?.tab?.id;
+      if (tabId) {
+        clearBadge(tabId);
+      }
+      sendResponse({ success: true });
+      return false;
+    }
     
     // Unknown action
     sendResponse({ success: false, error: 'Unknown action' });

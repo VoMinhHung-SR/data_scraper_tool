@@ -38,7 +38,12 @@
     scrapeProductDetail: async (forceAPI = false) => {
       try {
         const domData = Scraper.scrapeProductDetailFromDOM();
-        if (domData && (domData.name || domData.sku)) {
+        
+        // Accept both flat and grouped detail formats
+        const hasFlatFields = domData && (domData.name || domData.sku);
+        const hasGroupedFields = domData && domData.basicInfo && (domData.basicInfo.name || domData.basicInfo.sku);
+
+        if (hasFlatFields || hasGroupedFields) {
           return domData;
         }
         

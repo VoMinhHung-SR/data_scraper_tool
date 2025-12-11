@@ -60,8 +60,9 @@
       // Auto-detect: if first item has 'link' but no detailed fields, it's list
       // If has detailed fields like 'sku', 'description', 'ingredients', etc., it's detail
       const firstItem = data[0];
+      const hasGroupedDetailFields = firstItem?.basicInfo?.sku || firstItem?.basicInfo?.name || firstItem?.pricing || firstItem?.content;
       const hasDetailFields = firstItem.sku || firstItem.description || firstItem.ingredients || 
-                              firstItem.usage || firstItem.indication;
+                              firstItem.usage || firstItem.indication || hasGroupedDetailFields;
       const hasListFields = firstItem.link && !hasDetailFields;
       
       if (hasDetailFields) {

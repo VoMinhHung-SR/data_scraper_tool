@@ -125,7 +125,6 @@
           
           if (!link?.href || products.has(link.href)) continue;
           
-          // Quick validation: skip non-product links
           const href = link.href.toLowerCase();
           if (!productLinkPattern.test(href) || nonProductPattern.test(href)) continue;
 
@@ -148,15 +147,11 @@
             product.page = currentPage;
           }
 
-          // Optimized validation: check link first (fastest check)
-          if (!product.link.includes('.html')) continue;
-          
-          // Accept if we have link + at least one data field
           const hasData = (product.name && product.name !== 'N/A' && product.name.trim().length > 2) ||
                          (product.price && product.price.trim().length > 0) ||
                          (product.image && product.image.trim().length > 0);
           
-          if (hasData || product.link.includes('.html')) {
+          if (hasData) {
             products.set(link.href, product);
             newProducts++;
           }

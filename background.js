@@ -108,8 +108,24 @@
   // ============================================
   // 🚀 INITIALIZATION
   // ============================================
+  // ✅ BADGE HELPERS
+  // ============================================
+  const setBadge = (tabId, text, color) => {
+    if (!chrome.action || !tabId) return;
+    chrome.action.setBadgeText({ text, tabId });
+    if (color) {
+      chrome.action.setBadgeBackgroundColor({ color, tabId });
+    }
+  };
+
+  const showDoneBadge = (tabId) => setBadge(tabId, '✓', '#4CAF50');
+  const clearBadge = (tabId) => setBadge(tabId, '', undefined);
+
+  // Clear badge on install/update
   chrome.runtime.onInstalled.addListener(() => {
-    console.log('📊 Data Scraper Tool installed');
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(t => clearBadge(t.id));
+    });
   });
 
   // ============================================
@@ -122,6 +138,9 @@
 
     // Forward pagination completion to all tabs (popup might be listening)
     if (request.action === 'paginationComplete') {
+      // Only show badge for standalone list; skip if this is part of 1-click list+detail (requestId starts with listAndDetails_)
+      const isListAndDetails = request.requestId && String(request.requestId).startsWith('listAndDetails_');
+      if (!isListAndDetails && sender?.tab?.id) showDoneBadge(sender.tab.id);
       // Broadcast to all tabs - popup will catch it
       chrome.tabs.query({}, (tabs) => {
         tabs.forEach(tab => {
@@ -131,6 +150,17 @@
         });
       });
       sendResponse({ success: true });
+      return false;
+    }
+
+    if (request.action === 'scrollComplete') {
+      const isListAndDetails = request.requestId && String(request.requestId).startsWith('listAndDetails_');
+      if (!isListAndDetails && sender?.tab?.id) showDoneBadge(sender.tab.id);
+      return false;
+    }
+
+    if (request.action === 'detailsScrapingComplete') {
+      if (sender?.tab?.id) showDoneBadge(sender.tab.id);
       return false;
     }
     

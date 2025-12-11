@@ -112,7 +112,9 @@
           case 'productDetail':
             const forceAPI = options?.forceAPI || false;
             Scraper.scrapeProductDetail(forceAPI).then(data => {
-              if (data && (data.sku || data.name)) {
+              const hasFlatFields = data && (data.sku || data.name);
+              const hasGroupedFields = data && data.basicInfo && (data.basicInfo.sku || data.basicInfo.name);
+              if (hasFlatFields || hasGroupedFields) {
                 const resultData = Array.isArray(data) ? data : [data];
                 sendResponse({ 
                   success: true, 

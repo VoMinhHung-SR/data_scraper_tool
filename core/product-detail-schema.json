@@ -1,0 +1,57 @@
+{
+  "basicInfo": {
+    "name": "string",
+    "sku": "string",
+    "brand": "string",
+    "webName": "string",
+    "slug": "string"
+  },
+  "pricing": {
+    "price": "string",
+    "priceDisplay": "string",
+    "priceValue": "number",
+    "packageSize": "string",
+    "prices": "array",
+    "priceObj": "object|null"
+  },
+  "rating": {
+    "rating": "string",
+    "reviewCount": "string",
+    "commentCount": "string",
+    "reviews": "string"
+  },
+  "category": {
+    "category": "array",
+    "categoryPath": "string",
+    "categorySlug": "string"
+  },
+  "media": {
+    "image": "string",
+    "images": "array"
+  },
+  "content": {
+    "description": "string",
+    "ingredients": "string",
+    "usage": "string",
+    "dosage": "string",
+    "adverseEffect": "string",
+    "careful": "string",
+    "preservation": "string"
+  },
+  "specifications": {
+    "registrationNumber": "string",
+    "origin": "string",
+    "manufacturer": "string",
+    "shelfLife": "string",
+    "specifications": "object"
+  },
+  "metadata": {
+    "url": "string",
+    "link": "string",
+    "scrapedAt": "string",
+    "source": "string",
+    "productRanking": "number",
+    "displayCode": "number",
+    "isPublish": "boolean"
+  }
+}

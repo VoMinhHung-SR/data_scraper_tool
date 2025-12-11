@@ -12,7 +12,6 @@
   const PaginationHandler = window.DataScraperPaginationHandler;
 
   if (!Utils || !log) {
-    console.error('[DataScraper] Modules not loaded! Check manifest.json');
     return;
   }
 
@@ -35,119 +34,42 @@
     scrapeProductsWithScroll: PaginationHandler?.scrapeWithScroll || function() { return Promise.resolve([]); },
 
     // Detail scraping (keep in content.js for now, will optimize later)
-    // Scrape chi tiết sản phẩm từ trang detail (ưu tiên API, fallback DOM)
+    // Scrape chi tiết sản phẩm từ trang detail (chỉ dùng DOM)
     scrapeProductDetail: async (forceAPI = false) => {
       try {
-        log(`Bắt đầu scrape product detail từ: ${window.location.href}${forceAPI ? ' (Force API)' : ''}`, '🔍');
-        
-        // Bước 1: Extract SKU từ URL hoặc DOM để gọi API
-        let sku = '';
-        const urlMatch = window.location.pathname.match(/\/([^\/]+)\.html$/);
-        if (urlMatch) {
-          // Try to extract SKU from URL slug or DOM
-          const fullText = Utils.getText(document.body);
-          const skuMatch = fullText.match(/\b\d{6,8}\b/);
-          if (skuMatch) {
-            sku = skuMatch[0];
-            log(`Tìm thấy SKU từ body: ${sku}`, '🔍');
-          }
-        }
-        
-        // Extract SKU từ DOM nếu chưa có - ưu tiên data-test-id="sku"
-        if (!sku) {
-          const skuEl = Utils.safeQuery('[data-test-id="sku"]');
-          if (skuEl) {
-            sku = Utils.getText(skuEl).trim();
-            log(`Tìm thấy SKU từ [data-test-id="sku"]: ${sku}`, '🔍');
-          }
-        }
-        
-        if (!sku) {
-          const productInfoContainer = Utils.safeQuery('[data-lcpr="prr-id-product-detail-product-information"]') ||
-                                       Utils.safeQuery('[class*="product-detail"]') ||
-                                       document.body;
-          const fullText = Utils.getText(productInfoContainer);
-          const skuMatch = fullText.match(/\b\d{6,8}\b/);
-          if (skuMatch) {
-            sku = skuMatch[0];
-            log(`Tìm thấy SKU từ regex: ${sku}`, '🔍');
-          } else {
-            sku = Utils.getText(Utils.safeQuery('[class*="sku"], [class*="code"]', productInfoContainer));
-            if (sku) log(`Tìm thấy SKU từ class: ${sku}`, '🔍');
-          }
-        }
-
-        // Bước 2: Ưu tiên scrape từ API nếu có SKU hoặc forceAPI
-        if (sku && API?.scrapeProductDetailBySKU) {
-          log(`Đang scrape từ API với SKU: ${sku}`, '🌐');
-          try {
-            const apiDetail = await API.scrapeProductDetailBySKU(sku);
-            if (apiDetail && apiDetail.sku) {
-              log(`Đã lấy chi tiết từ API: ${apiDetail.name || apiDetail.sku}`, '✅');
-              return apiDetail;
-            }
-            if (forceAPI) {
-              log(`Force API nhưng không trả về data, thử lại...`, '⚠️');
-              // Retry với delay
-              await new Promise(resolve => setTimeout(resolve, 1000));
-              const retryDetail = await API.scrapeProductDetailBySKU(sku);
-              if (retryDetail && retryDetail.sku) {
-                log(`Đã lấy chi tiết từ API (retry): ${retryDetail.name || retryDetail.sku}`, '✅');
-                return retryDetail;
-              }
-            }
-            log(`API không trả về data, fallback về DOM`, '⚠️');
-          } catch (apiError) {
-            log(`Lỗi API: ${apiError.message}, fallback về DOM`, '⚠️');
-          }
-        } else {
-          if (forceAPI) {
-            log(`Force API nhưng không tìm thấy SKU, scrape từ DOM`, '⚠️');
-        } else {
-          log(`Không tìm thấy SKU hoặc API không khả dụng, scrape từ DOM`, '⚠️');
-          }
-        }
-
-        // Bước 3: Fallback về DOM scraping (trừ khi forceAPI và đã có data từ API)
         const domData = Scraper.scrapeProductDetailFromDOM();
-        if (domData) {
-          log(`Đã scrape từ DOM: ${domData.name || domData.sku || 'unknown'}`, '✅');
-        } else {
-          log(`Không thể scrape từ DOM`, '❌');
+        
+        // Accept both flat and grouped detail formats
+        const hasFlatFields = domData && (domData.name || domData.sku);
+        const hasGroupedFields = domData && domData.basicInfo && (domData.basicInfo.name || domData.basicInfo.sku);
+
+        if (hasFlatFields || hasGroupedFields) {
+          return domData;
         }
-        return domData;
+        
+        return null;
       } catch (error) {
-        log(`Lỗi khi scrape chi tiết: ${error.message}`, '❌');
-        console.error('Scrape product detail error:', error);
-        // Fallback về DOM nếu API fail
         return Scraper.scrapeProductDetailFromDOM();
       }
     },
 
-    // Helper: Extract content từ section detail-content
     extractDetailSection: (sectionId, className = null) => {
-      // Ưu tiên 1: Tìm theo class name nếu có
       let section = null;
       if (className) {
         section = Utils.safeQuery(`.${className}, [class*="${className}"]`);
       }
       
-      // Ưu tiên 2: Tìm theo ID
       if (!section && sectionId) {
         section = Utils.safeQuery(`#${sectionId}, [id="${sectionId}"]`);
       }
       
-      // Nếu không tìm thấy, return ""
       if (!section) {
-        log(`Không tìm thấy section: ${sectionId || className || 'unknown'}`, '⚠️');
         return '';
       }
 
-      // Thử expand section nếu bị collapse (click vào heading)
       try {
         const heading = Utils.safeQuery('h2, h3, h4', section);
         if (heading) {
-          // Kiểm tra xem section có bị collapse không (có thể check style hoặc class)
           const contentDiv = Utils.safeQuery('div > div', section);
           const isCollapsed = !contentDiv || 
                              contentDiv.style.display === 'none' || 
@@ -155,26 +77,19 @@
                              section.classList.contains('collapsed');
           
           if (isCollapsed) {
-            // Thử click vào heading để expand
             heading.click();
-            // Đợi một chút để content load
             setTimeout(() => {}, 100);
           }
         }
       } catch (e) {
-        // Ignore errors khi expand
       }
 
-      // Clone để không ảnh hưởng DOM gốc
       const content = section.cloneNode(true);
       
-      // Remove heading nếu có
       const heading = Utils.safeQuery('h2, h3, h4', content);
       if (heading) {
         heading.remove();
       }
-      
-      // Remove các element không cần thiết
       const removeSelectors = ['button', '[class*="toggle"]', '[class*="collapse"]', '[class*="expand"]', '[class*="css-"]'];
       removeSelectors.forEach(sel => {
         Utils.safeQueryAll(sel, content).forEach(el => el.remove());
@@ -699,22 +614,50 @@
           }
         });
         
-        // Extract ingredient (detail-content-1) - Thành phần
-        let ingredient = '';
+        // Extract ingredients (detail-content-1) - Thành phần
+        let ingredients = '';
         const ingredientSectionId = findSectionByClassOrHeading('ingredient', /Thành\s+phần/i, 'detail-content-1');
         if (ingredientSectionId) {
           // Đảm bảo section có class="ingredient"
           const ingredientSection = Utils.safeQuery(`.ingredient, [class*="ingredient"]`);
           if (ingredientSection && (ingredientSection.id === ingredientSectionId || ingredientSection.className.includes('ingredient'))) {
-            ingredient = Scraper.extractDetailSection(ingredientSectionId, 'ingredient');
+            // Ưu tiên extract từ table (lấy danh sách tên thành phần)
+            const table = Utils.safeQuery('table', ingredientSection);
+            if (table) {
+              const rows = Utils.safeQueryAll('tr', table);
+              const ingredientList = [];
+              
+              rows.forEach(row => {
+                const cells = Utils.safeQueryAll('td', row);
+                // Lấy tên thành phần từ cell đầu tiên (bỏ qua header)
+                if (cells.length > 0) {
+                  const name = Utils.getText(cells[0]).trim();
+                  // Bỏ qua header và các text không phải tên thành phần
+                  if (name && 
+                      name.length > 2 &&
+                      !name.match(/^(Thông tin thành phần|Hàm lượng|Thành phần cho)/i)) {
+                    ingredientList.push(name);
+                  }
+                }
+              });
+              
+              if (ingredientList.length > 0) {
+                ingredients = ingredientList.join(', ');
+              }
+            }
+            
+            // Fallback: extract toàn bộ section nếu không có table
+            if (!ingredients) {
+              ingredients = Scraper.extractDetailSection(ingredientSectionId, 'ingredient');
+            }
           }
         }
         // Fallback: từ specifications
-        if (!ingredient && specifications['Thành phần']) {
-          ingredient = specifications['Thành phần'];
+        if (!ingredients && specifications['Thành phần']) {
+          ingredients = specifications['Thành phần'];
         }
         // Đảm bảo return "" nếu không tìm thấy
-        ingredient = ingredient || '';
+        ingredients = ingredients || '';
         
         // Extract usage (detail-content-2) - Công dụng
         let usage = '';
@@ -843,7 +786,14 @@
           packageSize = specifications['Quy cách'];
         }
         
-        const product = {
+        // Build link từ URL
+        const url = window.location.href || '';
+        const urlMatch = url.match(/\/([^\/]+)\.html$/);
+        const slug = urlMatch ? urlMatch[1] : '';
+        const link = slug ? `https://nhathuoclongchau.com.vn/${slug}` : url;
+        
+        // Build flat structure trước (backward compatibility)
+        const flatProduct = {
           name: (name || '').trim(),
           sku: (sku || '').trim(),
           brand: (brand || '').trim(),
@@ -860,7 +810,7 @@
           images: Array.isArray(images) ? images.filter(img => img && typeof img === 'string' && img.trim()) : [],
           // Các section từ detail-content-*
           description: (description || '').trim(),
-          ingredient: (ingredient || '').trim(),
+          ingredients: (ingredients || '').trim(),
           usage: (usage || '').trim(),
           dosage: (dosage || '').trim(),
           adverseEffect: (adverseEffect || '').trim(),
@@ -871,39 +821,59 @@
           origin: (origin || '').trim(),
           manufacturer: (manufacturer || '').trim(),
           shelfLife: (shelfLife || '').trim(),
-          ingredients: (ingredient || specifications['Thành phần'] || '').trim(), // Alias cho ingredient, fallback từ specifications
           specifications: specifications || {},
-          url: (window.location.href || '').trim(),
+          url: url.trim(),
+          link: link.trim(),
           scrapedAt: new Date().toISOString(),
-          source: 'DOM'
+          source: 'DOM',
+          slug: slug
+        };
+        
+        // Format theo cấu trúc nhóm (database-friendly) nếu có formatter
+        const ProductFormatter = window.DataScraperProductFormatter;
+        const product = ProductFormatter ? ProductFormatter.formatProductDetail(flatProduct) : flatProduct;
+
+        const getField = (obj, path) => {
+          const parts = path.split('.');
+          let value = obj;
+          for (const part of parts) {
+            value = value?.[part];
+            if (value === undefined) return '';
+          }
+          return value || '';
         };
 
-        // Đảm bảo có ít nhất name hoặc sku
-        if (!product.name && !product.sku) {
-          log(`Không tìm thấy name hoặc sku, thử extract lại...`, '⚠️');
-          // Thử extract lại name từ title hoặc h1
-          if (!product.name) {
-            product.name = document.title || Utils.getText(Utils.safeQuery('h1')) || '';
+        const setField = (obj, path, value) => {
+          const parts = path.split('.');
+          let current = obj;
+          for (let i = 0; i < parts.length - 1; i++) {
+            if (!current[parts[i]]) current[parts[i]] = {};
+            current = current[parts[i]];
           }
-          // Thử extract lại sku từ URL
-          if (!product.sku) {
-            const urlSkuMatch = window.location.href.match(/\/(\d{6,8})\.html/);
-            if (urlSkuMatch) {
-              product.sku = urlSkuMatch[1];
-            }
+          current[parts[parts.length - 1]] = value;
+        };
+
+        let productName = getField(product, ProductFormatter ? 'basicInfo.name' : 'name');
+        let productSku = getField(product, ProductFormatter ? 'basicInfo.sku' : 'sku');
+        
+        if (!productName && !productSku) {
+          const extractedName = document.title || Utils.getText(Utils.safeQuery('h1')) || '';
+          const urlSkuMatch = window.location.href.match(/\/(\d{6,8})\.html/);
+          const extractedSku = urlSkuMatch ? urlSkuMatch[1] : '';
+          
+          if (extractedName) {
+            setField(product, ProductFormatter ? 'basicInfo.name' : 'name', extractedName);
+            productName = extractedName;
+          }
+          
+          if (extractedSku) {
+            setField(product, ProductFormatter ? 'basicInfo.sku' : 'sku', extractedSku);
+            productSku = extractedSku;
           }
         }
 
-        if (product.name || product.sku) {
-          log(`Đã scrape chi tiết từ DOM: ${product.name || product.sku}`, '📊');
-          return product;
-        } else {
-          log(`Không thể scrape chi tiết: không tìm thấy name hoặc sku`, '❌');
-          return null;
-        }
+        return (productName || productSku) ? product : null;
       } catch (error) {
-        log(`Lỗi khi scrape từ DOM: ${error.message}`, '❌');
-        console.error('Error details:', error);
         return null;
       }
     },
@@ -915,7 +885,6 @@
       const total = Math.min(links.length, maxDetails);
       
       if (total === 0) {
-        log('Không có link nào để scrape', '⚠️');
         return [];
       }
 
@@ -925,7 +894,6 @@
       ).filter(link => link && link.includes('.html'));
 
       if (normalizedLinks.length === 0) {
-        log('Không có link hợp lệ', '⚠️');
         return [];
       }
 
@@ -948,14 +916,12 @@
       
       await new Promise(resolve => {
         chrome.storage.local.set({ [stateKey]: state }, () => {
-          log(`Đã lưu ${normalizedLinks.length} links vào storage. Bắt đầu navigate...`, '💾');
           resolve();
         });
       });
 
       // Navigate to first product (auto-scrape sẽ tiếp tục)
       const firstLink = normalizedLinks[0];
-      log(`Chuyển đến sản phẩm đầu tiên: ${firstLink}`, '🔄');
       window.location.href = firstLink;
       
       // Return empty - details will be collected via storage and sent to popup
@@ -976,7 +942,6 @@
                 resolve(products.slice(0, maxProducts));
               })
               .catch(error => {
-                log(`Lỗi khi gọi API: ${error.message}`, '❌');
                 resolve([]);
               });
             return;
@@ -994,7 +959,6 @@
                 url.includes('productlist') ||
                 (url.includes('search') && url.includes('product'))
               )) {
-                log(`Phát hiện API call: ${url}`, '🔍');
                 
                 return originalFetch.apply(this, args)
                   .then(response => {
@@ -1006,7 +970,6 @@
                           apiProducts.push(product);
                         }
                       });
-                      log(`Đã intercept ${apiProducts.length} sản phẩm từ API`, '📊');
                     }).catch(() => {});
                     return response;
                   });
@@ -1028,7 +991,6 @@
             Scraper.findAPIInWindow(resolve, maxProducts);
           }
         } catch (error) {
-          log(`Lỗi khi scrape từ API: ${error.message}`, '❌');
           resolve([]);
         }
       });
@@ -1046,7 +1008,6 @@
               const products = Array.isArray(data) ? data : data.products;
               if (products.length > 0) {
                 const formatted = products.map(p => API?.formatProduct(p)).filter(p => p);
-                log(`Tìm thấy ${formatted.length} sản phẩm trong ${key}`, '✅');
                 resolve(formatted.slice(0, maxProducts));
                 return;
               }
@@ -1058,7 +1019,6 @@
         
         resolve([]);
       } catch (error) {
-        log(`Lỗi khi tìm API trong window: ${error.message}`, '❌');
         resolve([]);
       }
     },
@@ -1092,10 +1052,8 @@
           results.push(data);
         }
 
-        log(`Scraped ${results.length} custom items`, '📊');
         return results;
       } catch (error) {
-        log(`Lỗi khi scrape custom: ${error.message}`, '❌');
         return [];
       }
     }
@@ -1160,7 +1118,6 @@
       if (typeof url === 'string' && (
         url.includes('/api/') && (url.includes('product') || url.includes('sku'))
       )) {
-        log(`Phát hiện API call product detail: ${url}`, '🔍');
         
         return originalFetch.apply(this, args)
           .then(response => {
@@ -1175,7 +1132,6 @@
                     timestamp: Date.now()
                   }
                 });
-                log(`Đã lưu product detail từ API`, '💾');
               }
             }).catch(() => {});
             return response;
@@ -1198,7 +1154,6 @@
       const isProductPage = currentUrl.includes('.html');
       
       if (isProductPage) {
-        log(`Phát hiện trang detail, đang scrape... (${state.currentIndex + 1}/${state.links.length})`, '🔍');
         
         // Update progress indicator
         const total = state.links.length;
@@ -1216,7 +1171,6 @@
             const detail = await Scraper.scrapeProductDetail(forceAPI);
           if (detail) {
             state.details.push(detail);
-              log(`Đã scrape ${state.details.length}/${state.links.length}: ${detail.name || detail.sku || 'N/A'}`, '✅');
               
               // Update progress after scrape
               const newPercent = Math.round((state.details.length / total) * 100);
@@ -1224,10 +1178,8 @@
                 window.DataScraperProgressIndicator.update(newPercent);
               }
             } else {
-              log(`Không scrape được chi tiết cho sản phẩm ${state.currentIndex + 1}`, '⚠️');
             }
           } catch (error) {
-            log(`Lỗi khi scrape chi tiết: ${error.message}`, '❌');
           }
           
           state.currentIndex++;
@@ -1235,7 +1187,6 @@
           // Check if we've reached maxDetails limit or end of links
           if (state.currentIndex >= state.links.length || state.details.length >= (state.maxDetails || state.links.length)) {
             chrome.storage.local.remove(['scrapeDetailsState']);
-            log(`Hoàn thành scrape ${state.details.length} chi tiết!`, '🎉');
             
             // Show completion indicator
             if (window.DataScraperProgressIndicator) {
@@ -1252,7 +1203,6 @@
                 maxProducts: state.maxDetails || state.details.length
               }
             }, () => {
-              log(`Đã lưu ${state.details.length} chi tiết vào storage`, '💾');
             });
             
             // Send result to popup with retry mechanism
@@ -1266,16 +1216,11 @@
                 if (chrome.runtime.lastError) {
                   if (chrome.runtime.lastError.message.includes('Receiving end does not exist')) {
                     // Popup is closed, data is already saved to storage
-                    log(`Popup đã đóng, data đã được lưu vào storage. Sẽ hiển thị khi mở lại popup.`, '💾');
                   } else if (retryCount < 3) {
-                    log(`Lỗi gửi message, retry ${retryCount + 1}/3...`, '⚠️');
                     setTimeout(() => sendResult(retryCount + 1), 1000);
                   } else {
-                    log(`Không thể gửi message về popup: ${chrome.runtime.lastError.message}`, '❌');
-                    log(`Data đã được lưu vào storage, sẽ hiển thị khi mở lại popup.`, '💾');
                   }
                 } else {
-                  log(`✓ [DataScraper] Đã gửi ${state.details.length} chi tiết về popup`, '✅');
                 }
               });
             };
@@ -1291,13 +1236,11 @@
           
           if (nextLink) {
             chrome.storage.local.set({ scrapeDetailsState: state }, () => {
-              log(`Chuyển đến sản phẩm ${state.currentIndex + 1}/${state.links.length}...`, '🔄');
               setTimeout(() => {
                 window.location.href = nextLink;
               }, 1500);
             });
           } else {
-            log(`Không tìm thấy link tiếp theo, kết thúc`, '⏹️');
             chrome.storage.local.remove(['scrapeDetailsState']);
             
             // Save to storage first (fallback if popup is closed)
@@ -1319,7 +1262,6 @@
               timestamp: new Date().toISOString()
             }, (response) => {
               if (chrome.runtime.lastError) {
-                log(`Popup đã đóng, data đã được lưu vào storage.`, '💾');
               }
             });
           }
@@ -1343,7 +1285,6 @@
   chrome.storage.local.get(['paginationState'], (result) => {
     if (result.paginationState) {
       const state = result.paginationState;
-      log(`Phát hiện pagination state, tiếp tục từ trang ${state.currentPage}...`, '🔄');
       
       // Restore products
       const products = new Map(state.products);
@@ -1416,16 +1357,11 @@
                 page: currentPage
               };
 
-              // More lenient validation: allow shorter names if we have valid data
-              // For /thuoc/ pages, product names might be shorter, so be more flexible
               const hasValidName = product.name && product.name !== 'N/A' && product.name.trim().length > 2;
               const hasValidPrice = product.price && product.price.trim().length > 0;
               const hasValidImage = product.image && product.image.trim().length > 0;
-              const hasValidLink = product.link && product.link.includes('.html');
               
-              // Accept if we have link + (name OR price OR image)
-              // This ensures we capture products even if name extraction fails
-              if (hasValidLink && (hasValidName || hasValidPrice || hasValidImage)) {
+              if (hasValidName || hasValidPrice || hasValidImage) {
                 products.set(link.href, product);
               }
             } catch (e) {
@@ -1434,12 +1370,10 @@
           });
 
           const currentCount = products.size;
-          log(`Trang ${currentPage}: Tổng ${currentCount}/${maxProducts}`, '📊');
 
           if (currentCount >= maxProducts || currentPage >= maxPages) {
             chrome.storage.local.remove(['paginationState']);
             const finalProducts = Array.from(products.values()).slice(0, maxProducts);
-            log(`Hoàn thành: ${finalProducts.length} sản phẩm từ ${currentPage} trang`, '✅');
             
             // Send result back to popup if it's still listening
             chrome.runtime.sendMessage({
@@ -1456,7 +1390,6 @@
           if (!nextButton) {
             chrome.storage.local.remove(['paginationState']);
             const finalProducts = Array.from(products.values());
-            log(`Không còn trang tiếp theo. Tổng: ${finalProducts.length} sản phẩm`, '⏹️');
             
             chrome.runtime.sendMessage({
               action: 'paginationComplete',
@@ -1490,7 +1423,6 @@
             setTimeout(continueScraping, pageDelay);
           }
         } catch (error) {
-          log(`Lỗi: ${error.message}`, '❌');
           chrome.storage.local.remove(['paginationState']);
         }
       };
@@ -1506,5 +1438,4 @@
     }
   });
 
-  log('Data Scraper content script loaded ✅');
 })();

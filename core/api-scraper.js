@@ -174,6 +174,10 @@
         priceDisplay = product.priceDisplay;
         priceValue = product.priceValue || 0;
       }
+      
+      if (!priceDisplay || priceDisplay.trim() === '') {
+        priceDisplay = 'CONSULT';
+      }
 
       const category = Array.isArray(product.category) ? product.category : [];
       const categoryPath = category.length > 0 
@@ -368,10 +372,7 @@
         manufacturer: specifications['Nhà sản xuất'] ? String(specifications['Nhà sản xuất']).trim() : '',
         shelfLife: specifications['Hạn sử dụng'] ? String(specifications['Hạn sử dụng']).trim() : '',
         specifications: specifications,
-        url: url || '',
         link: link || '',
-        scrapedAt: new Date().toISOString(),
-        source: 'API',
         webName: product.webName || product.name || '',
         slug: slug || '',
         prices: Array.isArray(product.prices) ? product.prices : [],

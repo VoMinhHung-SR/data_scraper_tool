@@ -46,10 +46,7 @@
     "specifications": "object"
   },
   "metadata": {
-    "url": "string",
     "link": "string",
-    "scrapedAt": "string",
-    "source": "string",
     "productRanking": "number",
     "displayCode": "number",
     "isPublish": "boolean"

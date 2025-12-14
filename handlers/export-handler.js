@@ -162,6 +162,10 @@
         }
         priceDisplay = item.price;
       }
+      
+      if (!priceDisplay || priceDisplay.trim() === '') {
+        priceDisplay = 'CONSULT';
+      }
 
       // Extract category info
       let category = item.category || [];
@@ -283,10 +287,7 @@
         specifications: specifications,
         
         // Metadata
-        url: item.url || item.link || (slug ? `https://nhathuoclongchau.com.vn/${slug}` : ''),
         link: item.link || item.url || (slug ? `https://nhathuoclongchau.com.vn/${slug}` : ''),
-        scrapedAt: item.scrapedAt || new Date().toISOString(),
-        source: item.source || 'UNKNOWN',
         
         // Additional fields (giữ lại để tương thích)
         webName: item.webName || item.name || '',

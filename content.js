@@ -289,16 +289,45 @@
           }
         }
         
-        // Extract package size - ưu tiên data-test="unit" hoặc từ specifications
+        // Extract package size - ưu tiên data-test="unit", sau đó tìm element có class text-gray-10
         let packageSize = '';
         const unitEl = Utils.safeQuery('[data-test="unit"]', productInfoContainer);
         if (unitEl) {
           packageSize = Utils.getText(unitEl).trim();
         } else {
-          // Fallback: tìm từ specifications hoặc regex
-          const packageMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*(x\s*)?\d+[^\n\r]*/i);
-          if (packageMatch) {
-            packageSize = packageMatch[0].trim();
+          // Tìm element có class text-gray-10 text-body2 (packageSize trong CONSULT case)
+          // Tìm tất cả div có class chứa text-gray-10 và text-body2
+          const allDivs = Utils.safeQueryAll('div', productInfoContainer);
+          let packageSizeEl = null;
+          for (const div of allDivs) {
+            const classList = div.className || '';
+            if (classList.includes('text-gray-10') && classList.includes('text-body2')) {
+              const text = Utils.getText(div).trim();
+              // Kiểm tra nếu text bắt đầu bằng pattern package (Hộp, Gói, Vỉ, etc.)
+              if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*(x\s*)?\d+/i.test(text)) {
+                packageSizeEl = div;
+                break;
+              }
+            }
+          }
+          
+          if (packageSizeEl) {
+            const packageText = Utils.getText(packageSizeEl).trim();
+            // Chỉ lấy phần đơn vị đầu tiên (Hộp, Chai, Tuýp, Gói, Vỉ, Ống, Viên, ml, g)
+            const unitMatch = packageText.match(/^(Hộp|Chai|Tuýp|Gói|Vỉ|Ống|Viên|ml|g)/i);
+            if (unitMatch) {
+              packageSize = unitMatch[1];
+            } else {
+              packageSize = packageText;
+            }
+          }
+          
+          // Fallback: tìm từ specifications hoặc regex (giới hạn độ dài)
+          if (!packageSize) {
+            const packageMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*(x\s*)?\d+[^\s]*/i);
+            if (packageMatch) {
+              packageSize = packageMatch[0].trim();
+            }
           }
         }
         
@@ -822,10 +851,7 @@
           manufacturer: (manufacturer || '').trim(),
           shelfLife: (shelfLife || '').trim(),
           specifications: specifications || {},
-          url: url.trim(),
           link: link.trim(),
-          scrapedAt: new Date().toISOString(),
-          source: 'DOM',
           slug: slug
         };
         

@@ -17,9 +17,14 @@
         slug: data.basicInfo?.slug || data.slug || ''
       };
 
+      let priceDisplay = data.pricing?.priceDisplay || data.priceDisplay || data.price || '';
+      if (!priceDisplay || priceDisplay.trim() === '') {
+        priceDisplay = 'CONSULT';
+      }
+
       const pricing = {
         price: data.pricing?.price || data.price || '',
-        priceDisplay: data.pricing?.priceDisplay || data.priceDisplay || data.price || '',
+        priceDisplay: priceDisplay,
         priceValue: data.pricing?.priceValue !== undefined ? data.pricing.priceValue : (data.priceValue || 0),
         packageSize: data.pricing?.packageSize || data.packageSize || '',
         prices: Array.isArray(data.pricing?.prices) ? data.pricing.prices : (Array.isArray(data.prices) ? data.prices : []),
@@ -63,10 +68,7 @@
       };
 
       const metadata = {
-        url: data.metadata?.url || data.url || '',
         link: data.metadata?.link || data.link || '',
-        scrapedAt: data.metadata?.scrapedAt || data.scrapedAt || new Date().toISOString(),
-        source: data.metadata?.source || data.source || 'UNKNOWN',
         productRanking: data.metadata?.productRanking !== undefined ? data.metadata.productRanking : (data.productRanking || 0),
         displayCode: data.metadata?.displayCode !== undefined ? data.metadata.displayCode : (data.displayCode || 1),
         isPublish: data.metadata?.isPublish !== undefined ? data.metadata.isPublish : (data.isPublish !== undefined ? data.isPublish : true)
@@ -92,14 +94,19 @@
     flattenProductDetail: (groupedData) => {
       if (!groupedData || typeof groupedData !== 'object') return null;
 
+      let priceDisplay = groupedData.pricing?.priceDisplay || '';
+      if (!priceDisplay || priceDisplay.trim() === '') {
+        priceDisplay = 'CONSULT';
+      }
+
       return {
         name: groupedData.basicInfo?.name || '',
         sku: groupedData.basicInfo?.sku || '',
         brand: groupedData.basicInfo?.brand || '',
         webName: groupedData.basicInfo?.webName || '',
         slug: groupedData.basicInfo?.slug || '',
-        price: groupedData.pricing?.price || groupedData.pricing?.priceDisplay || '',
-        priceDisplay: groupedData.pricing?.priceDisplay || '',
+        price: groupedData.pricing?.price || priceDisplay || '',
+        priceDisplay: priceDisplay,
         priceValue: groupedData.pricing?.priceValue || 0,
         packageSize: groupedData.pricing?.packageSize || '',
         prices: groupedData.pricing?.prices || [],
@@ -125,10 +132,7 @@
         manufacturer: groupedData.specifications?.manufacturer || '',
         shelfLife: groupedData.specifications?.shelfLife || '',
         specifications: groupedData.specifications?.specifications || {},
-        url: groupedData.metadata?.url || '',
         link: groupedData.metadata?.link || '',
-        scrapedAt: groupedData.metadata?.scrapedAt || '',
-        source: groupedData.metadata?.source || '',
         productRanking: groupedData.metadata?.productRanking || 0,
         displayCode: groupedData.metadata?.displayCode || 1,
         isPublish: groupedData.metadata?.isPublish !== undefined ? groupedData.metadata.isPublish : true

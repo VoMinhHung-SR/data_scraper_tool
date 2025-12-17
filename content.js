@@ -325,8 +325,8 @@
           // Fallback: tìm từ specifications hoặc regex (giới hạn độ dài)
           if (!packageSize) {
             const packageMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*(x\s*)?\d+[^\s]*/i);
-            if (packageMatch) {
-              packageSize = packageMatch[0].trim();
+          if (packageMatch) {
+            packageSize = packageMatch[0].trim();
             }
           }
         }

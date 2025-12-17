@@ -122,19 +122,78 @@
      */
     saveDetailData: function(data) {
       if (data && Array.isArray(data) && data.length > 0) {
-        chrome.storage.local.set({ 
-          [this.STORAGE_KEY_DETAIL]: {
-            data: data,
-            timestamp: Date.now(),
-            count: data.length,
-            type: 'detail'
-          }
-        }, () => {
-          if (chrome.runtime.lastError) {
-            console.error('Error saving detail data:', chrome.runtime.lastError);
-          }
-        });
+        // Check storage quota before saving
+        if (chrome.storage.local.getBytesInUse) {
+          chrome.storage.local.getBytesInUse(null, (bytesInUse) => {
+            const quota = chrome.storage.local.QUOTA_BYTES || 10 * 1024 * 1024;
+            const estimatedSize = JSON.stringify(data).length;
+            
+            if (bytesInUse + estimatedSize > quota * 0.9) {
+              console.warn('[PopupState] Storage nearly full, cleaning old data...');
+              this._cleanupOldData(() => {
+                this._saveDetailDataInternal(data);
+              });
+            } else {
+              this._saveDetailDataInternal(data);
+            }
+          });
+        } else {
+          this._saveDetailDataInternal(data);
+        }
       }
+    },
+
+    /**
+     * Internal save detail data
+     */
+    _saveDetailDataInternal: function(data) {
+      chrome.storage.local.set({ 
+        [this.STORAGE_KEY_DETAIL]: {
+          data: data,
+          timestamp: Date.now(),
+          count: data.length,
+          type: 'detail'
+        }
+      }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Error saving detail data:', chrome.runtime.lastError);
+          window.PopupDisplay?.showMessage('Cảnh báo: Không thể lưu dữ liệu vào storage. Vui lòng export ngay.', 'error');
+        }
+      });
+    },
+
+    /**
+     * Cleanup old data (>24h)
+     */
+    _cleanupOldData: function(callback) {
+      chrome.storage.local.get([this.STORAGE_KEY_LIST, this.STORAGE_KEY_DETAIL], (result) => {
+        const now = Date.now();
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+        const keysToRemove = [];
+
+        if (result[this.STORAGE_KEY_LIST]) {
+          const age = now - result[this.STORAGE_KEY_LIST].timestamp;
+          if (age > maxAge) {
+            keysToRemove.push(this.STORAGE_KEY_LIST);
+          }
+        }
+
+        if (result[this.STORAGE_KEY_DETAIL]) {
+          const age = now - result[this.STORAGE_KEY_DETAIL].timestamp;
+          if (age > maxAge) {
+            keysToRemove.push(this.STORAGE_KEY_DETAIL);
+          }
+        }
+
+        if (keysToRemove.length > 0) {
+          chrome.storage.local.remove(keysToRemove, () => {
+            console.log('[PopupState] Cleaned up old data:', keysToRemove);
+            if (callback) callback();
+          });
+        } else {
+          if (callback) callback();
+        }
+      });
     },
 
     /**

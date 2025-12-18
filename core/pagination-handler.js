@@ -76,13 +76,13 @@
      * @param {Map} products - Products map (to avoid duplicates)
      * @param {number} currentPage - Current page number (for pagination)
      * @param {Object|null} cachedCategoryData - Cached category data
-     * @returns {number} Number of new products scraped
+     * @returns {Object} { newProducts: number, categoryData: Object }
      */
     _scrapeCurrentPage: (selector, container, products, currentPage = 0, cachedCategoryData = null) => {
       const Utils = window.DataScraperUtils;
       const ExtractionUtils = window.DataScraperExtractionUtils;
       
-      if (!selector) return 0;
+      if (!selector) return { newProducts: 0, categoryData: null };
       
       // Extract category from breadcrumb once (shared for all products on this page)
       // Use cached data if provided, otherwise extract on first page only
@@ -394,12 +394,19 @@
               log(`✅ Hoàn thành: ${finalProducts.length} sản phẩm (đã request ${maxProducts})`, '✅');
               
               if (options.requestId) {
+                console.log('[PaginationHandler] Sending scrollComplete message (enough products):', {
+                  requestId: options.requestId,
+                  dataLength: finalProducts.length,
+                  maxProducts: maxProducts
+                });
                 chrome.runtime.sendMessage({
                   action: 'scrollComplete',
                   requestId: options.requestId,
                   data: finalProducts,
                   url: window.location.href,
                   timestamp: new Date().toISOString()
+                }).catch(err => {
+                  console.error('[PaginationHandler] Error sending scrollComplete message:', err);
                 });
               }
               
@@ -415,12 +422,19 @@
                 log(`⚠️ Chỉ scrape được ${finalProducts.length}/${maxProducts} sản phẩm (không còn items mới)`, '⚠️');
                 
                 if (options.requestId) {
+                  console.log('[PaginationHandler] Sending scrollComplete message (no more items):', {
+                    requestId: options.requestId,
+                    dataLength: finalProducts.length,
+                    maxProducts: maxProducts
+                  });
                   chrome.runtime.sendMessage({
                     action: 'scrollComplete',
                     requestId: options.requestId,
                     data: finalProducts,
                     url: window.location.href,
                     timestamp: new Date().toISOString()
+                  }).catch(err => {
+                    console.error('[PaginationHandler] Error sending scrollComplete message:', err);
                   });
                 }
                 
@@ -437,12 +451,19 @@
                 log(`⏹️ Không còn sản phẩm mới. Hoàn thành: ${finalProducts.length}/${maxProducts} sản phẩm`, '⏹️');
                 
                 if (options.requestId) {
+                  console.log('[PaginationHandler] Sending scrollComplete message (no new products):', {
+                    requestId: options.requestId,
+                    dataLength: finalProducts.length,
+                    maxProducts: maxProducts
+                  });
                   chrome.runtime.sendMessage({
                     action: 'scrollComplete',
                     requestId: options.requestId,
                     data: finalProducts,
                     url: window.location.href,
                     timestamp: new Date().toISOString()
+                  }).catch(err => {
+                    console.error('[PaginationHandler] Error sending scrollComplete message:', err);
                   });
                 }
                 
@@ -461,12 +482,19 @@
               log(`⏹️ Đã scroll tối đa ${maxScrolls} lần. Hoàn thành: ${finalProducts.length}/${maxProducts} sản phẩm`, '⏹️');
               
               if (options.requestId) {
+                console.log('[PaginationHandler] Sending scrollComplete message (max scrolls):', {
+                  requestId: options.requestId,
+                  dataLength: finalProducts.length,
+                  maxProducts: maxProducts
+                });
                 chrome.runtime.sendMessage({
                   action: 'scrollComplete',
                   requestId: options.requestId,
                   data: finalProducts,
                   url: window.location.href,
                   timestamp: new Date().toISOString()
+                }).catch(err => {
+                  console.error('[PaginationHandler] Error sending scrollComplete message:', err);
                 });
               }
               
@@ -534,12 +562,20 @@
             log(`Hoàn thành: ${finalProducts.length}/${maxProducts} sản phẩm`, '⚠️');
             
             if (options.requestId) {
+              console.log('[PaginationHandler] Sending scrollComplete message (error):', {
+                requestId: options.requestId,
+                dataLength: finalProducts.length,
+                maxProducts: maxProducts,
+                error: error.message
+              });
               chrome.runtime.sendMessage({
                 action: 'scrollComplete',
                 requestId: options.requestId,
                 data: finalProducts,
                 url: window.location.href,
                 timestamp: new Date().toISOString()
+              }).catch(err => {
+                console.error('[PaginationHandler] Error sending scrollComplete message:', err);
               });
             }
             

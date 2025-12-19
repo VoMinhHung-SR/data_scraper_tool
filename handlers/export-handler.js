@@ -67,20 +67,46 @@
         const sizeInMB = blob.size / (1024 * 1024);
         console.log(`[ExportHandler] Downloading via Chrome API, size: ${sizeInMB.toFixed(2)}MB`);
         
+        // Validate inputs before calling chrome.downloads.download
+        if (!blobUrl || typeof blobUrl !== 'string' || !blobUrl.startsWith('blob:')) {
+          throw new Error(`Invalid blobUrl: ${blobUrl}`);
+        }
+        
+        if (!filename || typeof filename !== 'string' || filename.trim() === '') {
+          throw new Error(`Invalid filename: ${filename}`);
+        }
+        
+        // Check if chrome.downloads API is available
+        if (typeof chrome === 'undefined' || typeof chrome.downloads === 'undefined') {
+          throw new Error('chrome.downloads API is not available');
+        }
+        
+        if (typeof chrome.downloads.download !== 'function') {
+          throw new Error('chrome.downloads.download is not a function');
+        }
+        
         // Use chrome.downloads.download (Manifest V3 standard - no DOM hack)
         console.log('[ExportHandler] Calling chrome.downloads.download with:', {
           filename,
           urlType: typeof blobUrl,
           urlPreview: blobUrl.substring(0, 50) + '...',
-          blobSize: blob.size
+          blobSize: blob.size,
+          hasChromeDownloads: typeof chrome.downloads !== 'undefined',
+          hasDownloadFunction: typeof chrome.downloads?.download === 'function'
         });
         
-        chrome.downloads.download({
-          url: blobUrl,
-          filename: filename,
-          saveAs: true,
-          conflictAction: 'uniquify' // Auto-rename if file exists
-        }, (downloadId) => {
+        // Wrap in try-catch to catch any synchronous errors
+        // NOTE: In popup context, chrome.downloads.download may crash if called immediately
+        // Use setTimeout to defer the call and avoid crash
+        const callDownload = () => {
+          try {
+            console.log('[ExportHandler] About to call chrome.downloads.download...');
+            chrome.downloads.download({
+              url: blobUrl,
+              filename: filename,
+              saveAs: true,
+              conflictAction: 'uniquify' // Auto-rename if file exists
+            }, (downloadId) => {
           if (chrome.runtime.lastError) {
             const errorMsg = chrome.runtime.lastError.message;
             if (errorMsg.includes('USER_CANCELED')) {
@@ -113,7 +139,8 @@
             // This may help trigger the save dialog if saveAs didn't work
             // NOTE: chrome.downloads.show can crash in some contexts (popup, Brave browser)
             // So we validate downloadId and wrap in extensive error handling
-            if (downloadId !== undefined && downloadId !== null) {
+            // Set ENABLE_DOWNLOADS_SHOW to false to disable this feature completely
+            if (this.ENABLE_DOWNLOADS_SHOW && downloadId !== undefined && downloadId !== null) {
               console.log('[ExportHandler] Attempting to show download in manager, downloadId:', downloadId, 'type:', typeof downloadId);
               
               // Check if chrome.downloads.show is available
@@ -135,7 +162,11 @@
                 console.warn('[ExportHandler] ⚠️  chrome.downloads.show not available');
               }
             } else {
-              console.warn('[ExportHandler] ⚠️  Invalid downloadId, skipping chrome.downloads.show:', downloadId);
+              if (!this.ENABLE_DOWNLOADS_SHOW) {
+                console.log('[ExportHandler] ℹ️  chrome.downloads.show is disabled (ENABLE_DOWNLOADS_SHOW=false)');
+              } else {
+                console.warn('[ExportHandler] ⚠️  Invalid downloadId, skipping chrome.downloads.show:', downloadId);
+              }
             }
             
             // Show success message
@@ -159,7 +190,35 @@
             downloadCallback();
           }
         });
+          } catch (syncError) {
+            // Catch any synchronous errors from chrome.downloads.download call itself
+            console.error('[ExportHandler] ❌ Synchronous error calling chrome.downloads.download:', syncError);
+            console.error('[ExportHandler] Error details:', {
+              name: syncError?.name,
+              message: syncError?.message,
+              stack: syncError?.stack?.substring(0, 500)
+            });
+            
+            // Cleanup blob URL
+            try {
+              URL.revokeObjectURL(blobUrl);
+            } catch (revokeError) {
+              console.warn('[ExportHandler] Error revoking blob URL after sync error:', revokeError);
+            }
+            
+            this._handleError(syncError, 'Lỗi khi gọi chrome.downloads.download', downloadCallback);
+          }
+        };
+        
+        // Defer the call to avoid crash in popup context
+        // Small delay allows popup to stabilize before calling download API
+        const delay = 50; // 50ms delay
+        console.log(`[ExportHandler] Scheduling chrome.downloads.download call in ${delay}ms...`);
+        setTimeout(() => {
+          callDownload();
+        }, delay);
       } catch (error) {
+        console.error('[ExportHandler] ❌ Outer catch - Error in _downloadViaChromeAPI:', error);
         this._handleError(error, 'Lỗi khi tạo file download', downloadCallback);
       }
     },

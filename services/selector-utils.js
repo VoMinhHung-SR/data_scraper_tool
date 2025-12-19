@@ -102,35 +102,99 @@
 
     /**
      * Find "Xem thêm" / Load More button
-     * @param {string|null} customSelector - Custom selector
-     * @returns {Element|null}
+     * Generic function that works for any e-commerce site
+     * @param {string|null} customSelector - Custom selector (optional, highest priority)
+     * @param {Element|null} container - Container element to search within (optional, improves performance)
+     * @returns {Element|null} Found button element or null
      */
-    findLoadMoreButton: (customSelector = null) => {
+    findLoadMoreButton: (customSelector = null, container = null) => {
       const DOMUtils = window.DataScraperDOMUtils;
       
+      // Search in both container and document to ensure we find button even if outside container
+      // This is important because button might be in a sibling element or parent
+      const searchContexts = container ? [container, document] : [document];
+      
+      // Priority 0: Try custom selector first (user-defined, highest priority)
       if (customSelector) {
-        const button = DOMUtils.safeQuery(customSelector);
-        if (button && button.offsetParent !== null) return button;
+        for (const searchContext of searchContexts) {
+          try {
+            const button = DOMUtils.safeQuery(customSelector, searchContext);
+            if (button && button.offsetParent !== null) {
+              // If container provided, prefer button within container, but accept outside if not found
+              if (!container || container.contains(button) || searchContext === document) {
+                return button;
+              }
+            }
+          } catch (e) {
+            // Continue to next search context
+          }
+        }
       }
 
-      const allButtons = DOMUtils.safeQueryAll('button');
-      const loadMoreButton = allButtons.find(el => {
-        if (!el.offsetParent) return false;
-        const text = DOMUtils.getText(el).toLowerCase().trim();
-        const tagName = el.tagName.toLowerCase();
-        if (tagName !== 'button' || el.href) return false;
-        
-        // Ignore buttons in navigation/menu
-        const parent = el.closest('nav, [class*="category"], [class*="menu"], [class*="sidebar"]');
-        if (parent) return false;
-        
-        return text.startsWith('xem thêm') || 
-               text.startsWith('xem tiếp') || 
-               text.startsWith('load more') || 
-               /xem\s+thêm\s+\d+/.test(text);
-      });
+      // Priority 1: Try common CSS class patterns (generic, reusable for any site)
+      const specificSelectors = [
+        'button.mt-3', // Common Tailwind CSS pattern (matches user's button)
+        'button[class*="mt-3"]', // Partial class match
+        'button[class*="load-more"]', // Generic load-more pattern
+        'button[class*="load"]', // Generic load pattern
+      ];
+      
+      for (const sel of specificSelectors) {
+        for (const searchContext of searchContexts) {
+          try {
+            const buttons = DOMUtils.safeQueryAll(sel, searchContext);
+            for (const btn of buttons) {
+              // If container provided, prefer button within container, but accept outside if not found in container
+              if (container && !container.contains(btn) && searchContext === container) continue;
+              
+              if (!btn.offsetParent) continue;
+              const text = DOMUtils.getText(btn).toLowerCase().trim();
+              if (/xem\s+thêm|load\s+more/i.test(text)) {
+                return btn;
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+      }
 
-      return loadMoreButton || null;
+      // Priority 2: Fallback - Find all buttons and filter by text pattern (generic, works for any site)
+      // This ensures the function works even if CSS patterns don't match
+      for (const searchContext of searchContexts) {
+        const allButtons = DOMUtils.safeQueryAll('button', searchContext);
+        
+        for (const btn of allButtons) {
+          try {
+            // If container provided, prefer button within container, but accept outside if not found in container
+            if (container && !container.contains(btn) && searchContext === container) continue;
+            
+            // Basic visibility check
+            if (!btn.offsetParent) continue;
+            
+            const rect = btn.getBoundingClientRect();
+            if (rect.height === 0 || rect.width === 0) continue;
+            
+            // Get text and check if it matches common "load more" patterns (generic, multilingual)
+            const text = DOMUtils.getText(btn).toLowerCase().trim();
+            
+            // Match common patterns: "xem thêm", "xem thêm 188 sản phẩm", "load more", etc.
+            // This pattern works for Vietnamese and English sites
+            if (/xem\s+thêm|load\s+more|show\s+more|see\s+more/i.test(text)) {
+              // Skip if disabled or hidden
+              const style = window.getComputedStyle(btn);
+              if (style.display === 'none' || style.visibility === 'hidden') continue;
+              if (btn.disabled) continue;
+              
+              return btn;
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+      }
+
+      return null;
     },
 
     /**

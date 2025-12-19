@@ -45,6 +45,12 @@
     "webRequest"
   ],
   "host_permissions": ["*://*/*"],
+  "web_accessible_resources": [
+    {
+      "resources": ["test/data.test"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "icons": {
     "16": "icons/icon.png",
     "48": "icons/icon.png",

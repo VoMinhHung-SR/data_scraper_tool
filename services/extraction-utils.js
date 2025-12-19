@@ -151,6 +151,11 @@
         }
       }
 
+      // Final cleanup: remove any remaining emoji/icons
+      if (name) {
+        name = window.DataScraperDOMUtils.removeEmojiAndIcons(name);
+      }
+
       return name || '';
     },
 
@@ -199,6 +204,11 @@
             }
           }
         }
+      }
+
+      // Clean up price: remove emoji/icons
+      if (price) {
+        price = window.DataScraperDOMUtils.removeEmojiAndIcons(price);
       }
 
       return price;
@@ -259,6 +269,11 @@
         if (packageMatch) {
           packageInfo = packageMatch[0].trim();
         }
+      }
+
+      // Clean up package info: remove emoji/icons
+      if (packageInfo) {
+        packageInfo = window.DataScraperDOMUtils.removeEmojiAndIcons(packageInfo);
       }
 
       return packageInfo;
@@ -394,7 +409,13 @@
         }
       }
       
-      return sku.trim();
+      // Clean up SKU: remove emoji/icons
+      sku = sku.trim();
+      if (sku) {
+        sku = window.DataScraperDOMUtils.removeEmojiAndIcons(sku);
+      }
+      
+      return sku;
     },
 
     /**
@@ -425,6 +446,11 @@
         }
       }
       
+      // Clean up brand: remove emoji/icons
+      if (brand) {
+        brand = window.DataScraperDOMUtils.removeEmojiAndIcons(brand);
+      }
+      
       return brand;
     },
 
@@ -441,8 +467,13 @@
       DOMUtils.safeQueryAll('[class*="spec"] tr, [class*="attribute"] tr, table tr, [class*="info"] tr', container).forEach(row => {
         const cells = DOMUtils.safeQueryAll('td, th', row);
         if (cells.length >= 2) {
-          const key = DOMUtils.getText(cells[0]).trim().replace(/[:\s]+$/, '');
-          const value = DOMUtils.getText(cells[1]).trim();
+          let key = DOMUtils.getText(cells[0]).trim().replace(/[:\s]+$/, '');
+          let value = DOMUtils.getText(cells[1]).trim();
+          
+          // Remove emoji/icons from key and value
+          key = window.DataScraperDOMUtils.removeEmojiAndIcons(key);
+          value = window.DataScraperDOMUtils.removeEmojiAndIcons(value);
+          
           if (key && value && key !== value && !key.includes('Chọn')) {
             specifications[key] = value;
           }
@@ -451,8 +482,13 @@
       
       // Extract from label-value divs
       DOMUtils.safeQueryAll('[class*="info-item"], [class*="detail-item"]', container).forEach(item => {
-        const label = DOMUtils.getText(DOMUtils.safeQuery('[class*="label"], [class*="title"]', item));
-        const value = DOMUtils.getText(DOMUtils.safeQuery('[class*="value"], [class*="content"]', item));
+        let label = DOMUtils.getText(DOMUtils.safeQuery('[class*="label"], [class*="title"]', item));
+        let value = DOMUtils.getText(DOMUtils.safeQuery('[class*="value"], [class*="content"]', item));
+        
+        // Remove emoji/icons from label and value
+        label = window.DataScraperDOMUtils.removeEmojiAndIcons(label);
+        value = window.DataScraperDOMUtils.removeEmojiAndIcons(value);
+        
         if (label && value && !label.includes('Chọn')) {
           specifications[label] = value;
         }
@@ -462,14 +498,18 @@
     },
 
     /**
-     * Clean section text (remove unwanted content)
+     * Clean section text (remove unwanted content and emoji/icons)
      * @param {string} text - Text to clean
      * @returns {string}
      */
     cleanSectionText: (text) => {
       if (!text) return '';
       
-      return text
+      // First remove emoji/icons
+      const DOMUtils = window.DataScraperDOMUtils;
+      let cleaned = DOMUtils.removeEmojiAndIcons(text);
+      
+      return cleaned
         .split('\n')
         .map(line => line.trim())
         .filter(line => 

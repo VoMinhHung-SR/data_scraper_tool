@@ -27,6 +27,12 @@
       return window.DataScraperDOMUtils.findContainer(containerSelector);
     },
 
+    findParentContainer: (productContainer) => {
+      return window.DataScraperDOMUtils.findParentContainer ? 
+        window.DataScraperDOMUtils.findParentContainer(productContainer) : 
+        (productContainer?.parentElement || productContainer);
+    },
+
     isVisible: (element) => {
       return window.DataScraperDOMUtils.isVisible(element);
     },
@@ -50,8 +56,8 @@
       return window.DataScraperSelectorUtils.findNextPageButton(customSelector);
     },
 
-    findLoadMoreButton: (customSelector = null) => {
-      return window.DataScraperSelectorUtils.findLoadMoreButton(customSelector);
+    findLoadMoreButton: (customSelector = null, container = null) => {
+      return window.DataScraperSelectorUtils.findLoadMoreButton(customSelector, container);
     },
 
     testSelector: (selector, sampleSize = 5) => {

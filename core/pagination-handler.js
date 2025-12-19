@@ -48,6 +48,7 @@
     _findItems: (selector, container) => {
       const Utils = window.DataScraperUtils;
       
+      // Simple logic like old version - no complex filtering
       if (selector.startsWith('>')) {
         return Array.from(container.children);
       }
@@ -82,7 +83,7 @@
       const Utils = window.DataScraperUtils;
       const ExtractionUtils = window.DataScraperExtractionUtils;
       
-      if (!selector) return 0;
+      if (!selector) return { newProducts: 0, categoryData: cachedCategoryData };
       
       // Extract category from breadcrumb once (shared for all products on this page)
       // Use cached data if provided, otherwise extract on first page only
@@ -91,45 +92,50 @@
         categoryData = ExtractionUtils.extractCategoryFromBreadcrumb();
       }
 
-      // Find items using optimized method
-      const items = window.DataScraperPaginationHandler._findItems(selector, container);
+      // Find items - use simple logic like old version
+      let items = [];
+      if (selector.startsWith('>')) {
+        items = Array.from(container.children);
+      } else if (selector.includes('a[href]') || selector.includes('a[')) {
+        items = Utils.safeQueryAll(selector, container);
+      } else {
+        items = Utils.safeQueryAll(selector, container);
+      }
 
-      // Process items with optimized validation
+      // Process items - simple forEach like old version
       let newProducts = 0;
-      const productLinkPattern = /\.html|^\/[^\/]+\/[^\/]+$/i;
-      const nonProductPattern = /\/(trang-chu|home|index|search|tim-kiem)/i;
       
-      for (const item of items) {
+      items.forEach((item) => {
         try {
           let link = null;
           let card = item;
           
-          // Optimize link and card finding
+          // If item is already an <a> tag, use it as link and find parent container
           if (item.tagName === 'A') {
             link = item;
-            const parent = item.parentElement;
-            // Optimize card finding - check most common cases first
-            if (parent && parent.parentElement === container) {
-              card = parent;
-            } else if (parent?.classList.toString().match(/(product|card|item)/i)) {
-              card = parent;
-            } else {
-              card = item.closest('[class*="product"], [class*="card"], [class*="item"]') || parent || item;
-            }
+            // Find parent container for extraction
+            card = item.closest('[class*="product"], [class*="card"], [class*="item"]') 
+                || item.closest('div, article, li, section') 
+                || item.parentElement 
+                || item;
           } else {
-            // Try .html first (most common), then any valid link
+            // Flexible link finding for all product types
+            // Try .html first (most common pattern), then any valid link
             link = Utils.safeQuery('a[href*=".html"]', item) 
                 || Utils.safeQuery('a[href]:not([href^="#"]):not([href^="javascript:"]):not([href^="mailto:"]):not([href^="tel:"])', item);
             card = item;
           }
           
-          if (!link?.href || products.has(link.href)) continue;
-          
+          if (!link || !link.href || products.has(link.href)) return;
+
+          // Skip non-product links
+          // Accept any link with .html (flexible for all categories/domains on the site)
           const href = link.href.toLowerCase();
-          if (!productLinkPattern.test(href) || nonProductPattern.test(href)) continue;
+          const isProductLink = href.includes('.html') || 
+            (href.match(/\/[^\/]+\/[^\/]+$/) && !href.match(/\/(trang-chu|home|index|search|tim-kiem)/i));
+          if (!isProductLink) return;
 
           const info = ExtractionUtils.extractProductInfo(card, link);
-          
           const product = {
             name: info.name || 'N/A',
             price: info.price || '',
@@ -140,25 +146,22 @@
             sku: '',
             category: categoryData?.category || [],
             categoryPath: categoryData?.categoryPath || '',
-            categorySlug: categoryData?.categorySlug || ''
+            categorySlug: categoryData?.categorySlug || '',
+            page: currentPage > 0 ? currentPage : undefined
           };
 
-          if (currentPage > 0) {
-            product.page = currentPage;
-          }
-
-          const hasData = (product.name && product.name !== 'N/A' && product.name.trim().length > 2) ||
-                         (product.price && product.price.trim().length > 0) ||
-                         (product.image && product.image.trim().length > 0);
+          const hasValidName = product.name && product.name !== 'N/A' && product.name.trim().length > 2;
+          const hasValidPrice = product.price && product.price.trim().length > 0;
+          const hasValidImage = product.image && product.image.trim().length > 0;
           
-          if (hasData) {
+          if (hasValidName || hasValidPrice || hasValidImage) {
             products.set(link.href, product);
             newProducts++;
           }
         } catch (e) {
           // Skip invalid item silently
         }
-      }
+      });
 
       return { newProducts, categoryData };
     },
@@ -277,44 +280,17 @@
               requestId
             });
 
-            // Click next page button
+            // Click next page button - simple like old version
             if (nextPageButton.href) {
               // Navigate to next page (will reload content script)
               window.location.href = nextPageButton.href;
               return;
             } else {
-              // AJAX pagination
+              // AJAX pagination - simple click and wait like old version
               nextPageButton.click();
-
-              const waitForContentUpdate = () => {
-                let checkCount = 0;
-                const maxChecks = 50;
-                const initialItemCount = Utils.safeQueryAll(selector, container).length;
-
-                const checkInterval = setInterval(() => {
-                  checkCount++;
-                  const currentItems = Utils.safeQueryAll(selector, container);
-                  const urlChanged = window.location.href !== currentUrl;
-
-                  if (currentItems.length > initialItemCount || urlChanged) {
-                    clearInterval(checkInterval);
-                    setTimeout(() => {
-                      scrapeCurrentPage();
-                    }, pageDelay);
-                    return;
-                  }
-
-                  if (checkCount >= maxChecks) {
-                    clearInterval(checkInterval);
-                    log('Timeout khi chờ nội dung cập nhật', '⚠️');
-                    StateManager.clearPaginationState();
-                    const finalProducts = Array.from(products.values()).slice(0, maxProducts);
-                    resolve(finalProducts);
-                  }
-                }, 100);
-              };
-
-              waitForContentUpdate();
+              setTimeout(() => {
+                scrapeCurrentPage();
+              }, pageDelay);
             }
           } catch (error) {
             log(`Lỗi khi scrape trang ${currentPage}: ${error.message}`, '❌');
@@ -368,8 +344,18 @@
 
         // Scrape current products with cached category data
         let cachedCategoryData = null;
+        let isWaitingForContent = false; // Track if we're waiting for content to load
+        let lastClickedButton = null; // Track last clicked button to prevent double clicks
+        let lastClickedButtonText = null; // Track button text to detect new button instances
+        let lastClickTime = 0; // Track when button was last clicked
+        
         const scrapeCurrentProducts = () => {
           try {
+            // Skip if already waiting for content to load
+            if (isWaitingForContent) {
+              return;
+            }
+            
             // Scrape current page from grid container
             const result = window.DataScraperPaginationHandler._scrapeCurrentPage(
               selector,
@@ -476,52 +462,92 @@
 
             // Try "Xem thêm" button first
             if (useLoadMore) {
-              const loadMoreButton = SelectorUtils.findLoadMoreButton(loadMoreSelector);
+              // Find parent container that includes both products and button
+              const DOMUtils = window.DataScraperDOMUtils;
+              const parentContainer = DOMUtils.findParentContainer(container);
+              
+              // Search for button in parent container (broader scope) or document
+              const loadMoreButton = SelectorUtils.findLoadMoreButton(loadMoreSelector, parentContainer);
 
-              if (loadMoreButton && loadMoreButton.offsetParent !== null) {
+              // Get button text to detect if it's a new button instance (DOM might have changed)
+              const buttonText = loadMoreButton ? DOMUtils.getText(loadMoreButton).toLowerCase().trim() : '';
+              const isNewButton = !lastClickedButtonText || buttonText !== lastClickedButtonText;
+              const timeSinceLastClick = Date.now() - lastClickTime;
+              const shouldResetLastButton = timeSinceLastClick > 5000; // Reset after 5 seconds
+
+              // Verify button is visible and not the same as last clicked button
+              // Also check if it's a new button instance (different text) or enough time has passed
+              if (loadMoreButton && 
+                  loadMoreButton.offsetParent !== null && 
+                  (isNewButton || shouldResetLastButton || loadMoreButton !== lastClickedButton) &&
+                  !loadMoreButton.disabled) {
                 try {
+                  // Mark as waiting to prevent concurrent clicks
+                  isWaitingForContent = true;
+                  lastClickedButton = loadMoreButton;
+                  lastClickedButtonText = buttonText;
+                  lastClickTime = Date.now();
+                  
+                  // Simple scroll and click like old version
                   loadMoreButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
                   setTimeout(() => {
-                    loadMoreButton.click();
-                    loadMoreClickCount++;
-                    log(`Đã click nút "Xem thêm" (lần ${loadMoreClickCount})`, '🔄');
-
-                    // Store itemsBefore before waiting for new content
-                    const itemsBeforeLoadMore = Utils.safeQueryAll(selector, container).length;
-
-                    const waitForNewContent = () => {
-                      let checkCount = 0;
-                      const maxChecks = 30;
-
-                      const checkInterval = setInterval(() => {
-                        checkCount++;
-                        const currentItems = Utils.safeQueryAll(selector, container);
-
-                        if (currentItems.length > itemsBeforeLoadMore) {
-                          clearInterval(checkInterval);
-                          log(`Đã load thêm ${currentItems.length - itemsBeforeLoadMore} sản phẩm`, '✅');
-                          setTimeout(() => {
-                            scrapeCurrentProducts();
-                          }, scrollDelay);
-                          return;
-                        }
-
-                        if (checkCount >= maxChecks) {
-                          clearInterval(checkInterval);
-                          setTimeout(() => {
-                            scrapeCurrentProducts();
-                          }, scrollDelay);
-                        }
-                      }, 100);
-                    };
-
-                    waitForNewContent();
+                    // Double-check button is still valid before clicking
+                    if (!loadMoreButton.offsetParent || loadMoreButton.disabled) {
+                      isWaitingForContent = false;
+                      lastClickedButton = null;
+                      lastClickedButtonText = null;
+                      lastClickTime = 0;
+                      scrapeCurrentProducts();
+                      return;
+                    }
+                    
+                    // Simple click and wait like old version
+                    try {
+                      loadMoreButton.click();
+                      loadMoreClickCount++;
+                      log(`Đã click nút "Xem thêm" (lần ${loadMoreClickCount})`, '🔄');
+                      
+                      // Simple wait like old version - just wait scrollDelay then continue
+                      setTimeout(() => {
+                        isWaitingForContent = false;
+                        lastClickedButton = null;
+                        lastClickedButtonText = null;
+                        lastClickTime = 0;
+                        scrapeCurrentProducts();
+                      }, scrollDelay);
+                    } catch (e) {
+                      log(`Lỗi khi click "Xem thêm": ${e.message}`, '⚠️');
+                      isWaitingForContent = false;
+                      lastClickedButton = null;
+                      lastClickedButtonText = null;
+                      lastClickTime = 0;
+                      scrapeCurrentProducts();
+                      return;
+                    }
                   }, 500);
                   return;
                 } catch (e) {
+                  isWaitingForContent = false;
+                  lastClickedButton = null;
+                  lastClickedButtonText = null;
+                  lastClickTime = 0;
                   log(`Lỗi khi click "Xem thêm": ${e.message}`, '⚠️');
                 }
+              } else if (loadMoreButton && !isNewButton && !shouldResetLastButton && loadMoreButton === lastClickedButton) {
+                // Button was already clicked recently, wait a bit more
+                log(`Đang chờ nội dung từ lần click trước... (${Math.round(timeSinceLastClick/1000)}s ago)`, '⏳');
+                setTimeout(() => {
+                  scrapeCurrentProducts();
+                }, scrollDelay);
+                return;
+              } else if (loadMoreButton && loadMoreButton.disabled) {
+                // Button is disabled, might be loading - wait a bit
+                log(`Nút "Xem thêm" đang disabled (có thể đang load)...`, '⏳');
+                setTimeout(() => {
+                  scrapeCurrentProducts();
+                }, scrollDelay);
+                return;
               }
             }
 
@@ -552,4 +578,3 @@
     }
   };
 })();
-

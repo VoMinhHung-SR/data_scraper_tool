@@ -315,6 +315,27 @@
         return;
       }
 
+      // Fix: Clear any existing state first to prevent stuck listeners
+      // This fixes the issue where scraping doesn't work after clear + routing
+      // Clear all scraper-related states to ensure clean start
+      const stateKeysToRemove = [
+        'scrapeDetailsState',
+        'paginationState',
+        window.DataScraperStateManager?.KEYS?.PAGINATION,
+        window.DataScraperStateManager?.KEYS?.DETAIL_LIST,
+        window.DataScraperStateManager?.KEYS?.API_CACHE
+      ].filter(Boolean);
+      
+      console.log('[ScrapeListAndDetails] Clearing existing states before starting:', stateKeysToRemove);
+      chrome.storage.local.remove(stateKeysToRemove, () => {
+        if (chrome.runtime.lastError) {
+          console.error('[ScrapeListAndDetails] Error clearing states:', chrome.runtime.lastError);
+        } else {
+          console.log('[ScrapeListAndDetails] Successfully cleared existing states');
+        }
+        // Continue after cleanup
+      });
+
       const maxProductsInput = document.getElementById('maxProducts');
       const skipProductsInput = document.getElementById('skipProducts');
       const productSelectorInput = document.getElementById('productSelector');
@@ -329,6 +350,17 @@
       const loadMoreSelector = loadMoreSelectorInput?.value.trim() || null;
       const nextPageSelector = nextPageSelectorInput?.value.trim() || null;
       const maxDetails = maxProducts; // Limit details = list (same limit)
+      
+      // Validate skip + limit
+      if (skipProducts < 0) {
+        window.PopupDisplay.showMessage('Skip không thể âm', 'error');
+        return;
+      }
+      
+      if (maxProducts <= 0) {
+        window.PopupDisplay.showMessage('Limit phải lớn hơn 0', 'error');
+        return;
+      }
 
       // Show custom modal to choose method
       const modal = document.getElementById('methodModal');
@@ -451,27 +483,60 @@
 
       // Listen for pagination/scroll completion
       const messageListener = (message, sender, sendResponse) => {
-        if ((message.action === 'paginationComplete' || message.action === 'scrollComplete') && 
-            message.requestId === requestId) {
+        // Log ALL messages to debug
+        console.log('[ScrapeListAndDetails] Message received (all):', {
+          action: message?.action,
+          requestId: message?.requestId,
+          expectedRequestId: requestId,
+          hasData: !!message?.data,
+          dataLength: message?.data?.length || 0,
+          sender: sender?.tab?.id || 'unknown'
+        });
+        
+        // Log specific messages for debugging
+        if (message?.action === 'paginationComplete' || message?.action === 'scrollComplete') {
+          console.log('[ScrapeListAndDetails] Received scrollComplete/paginationComplete message:', {
+            action: message.action,
+            requestId: message.requestId,
+            expectedRequestId: requestId,
+            match: message.requestId === requestId,
+            dataLength: message.data?.length || 0,
+            sender: sender?.tab?.id || 'unknown'
+          });
+        }
+        
+        if ((message?.action === 'paginationComplete' || message?.action === 'scrollComplete') && 
+            message?.requestId === requestId) {
+          console.log('[ScrapeListAndDetails] Message matched! Processing...');
           chrome.runtime.onMessage.removeListener(messageListener);
           
           productList = message.data || [];
-          // Apply skip logic: skip first N items, then take maxDetails items
-          const productLinks = productList
+          console.log('[ScrapeListAndDetails] Product list received:', productList.length, 'items');
+          
+          // Extract all links first
+          const allProductLinks = productList
             .map(p => p.link || p.url || p.href)
-            .filter(link => link && link.includes('.html'))
-            .slice(skipProducts, skipProducts + maxDetails);
-
+            .filter(link => link && link.includes('.html'));
+          
+          console.log('[ScrapeListAndDetails] All product links:', allProductLinks.length);
+          
+          // Apply skip: skip first N items, then take maxDetails items
+          // Example: skip=100, limit=100 → scrape 200 items, then take items 101-200
+          const productLinks = allProductLinks.slice(skipProducts, skipProducts + maxDetails);
+          
+          console.log(`[ScrapeListAndDetails] Skip: ${skipProducts}, Limit: ${maxDetails}, Total scraped: ${productList.length}, Total links: ${allProductLinks.length}, Links to scrape: ${productLinks.length} (range: ${skipProducts + 1}-${skipProducts + productLinks.length})`);
+          
           if (productLinks.length === 0) {
-            window.PopupDisplay.showMessage('Không tìm thấy link sản phẩm trong danh sách!', 'error');
+            window.PopupDisplay.showMessage(
+              `Không có link nào sau khi skip ${skipProducts} items. Tổng số links: ${allProductLinks.length}`, 
+              'error'
+            );
             return;
           }
+          
+          console.log('[ScrapeListAndDetails] Starting detail scraping for', productLinks.length, 'products');
 
           // Step 2: Scrape details
-          if (processingStatus && processingText) {
-            processingText.textContent = `Bước 2/2: Đã scrape ${productList.length} sản phẩm trong list. Đang scrape chi tiết ${productLinks.length} sản phẩm...`;
-          }
-          
           window.PopupDisplay.showMessage(
             `✅ Đã scrape ${productList.length} sản phẩm trong list\n` +
             `🔍 Bước 2/2: Đang scrape chi tiết ${productLinks.length} sản phẩm (giới hạn: ${maxDetails})...`, 
@@ -509,6 +574,7 @@
           const forceAPIInput = document.getElementById('forceAPIScraping');
           const forceAPI = forceAPIInput ? forceAPIInput.checked : false;
 
+          console.log('[ScrapeListAndDetails] Sending detail scrape request with', productLinks.length, 'links');
           chrome.tabs.sendMessage(tab.id, {
             action: 'scrape',
             type: 'productDetailsFromList',
@@ -520,10 +586,12 @@
             }
           }, (response) => {
             if (chrome.runtime.lastError) {
+              console.error('[ScrapeListAndDetails] Error sending detail scrape request:', chrome.runtime.lastError);
               chrome.runtime.onMessage.removeListener(detailsListener);
               window.PopupDisplay.showMessage('Lỗi: ' + chrome.runtime.lastError.message, 'error');
               return;
             }
+            console.log('[ScrapeListAndDetails] Detail scrape request sent, response:', response);
             // Response chỉ là empty array, chi tiết sẽ đến qua detailsScrapingComplete
             if (response?.success !== false) {
               // Đã bắt đầu scrape, chờ detailsScrapingComplete
@@ -539,13 +607,18 @@
         }
       };
 
+      // Add listener BEFORE starting scrape to ensure it's ready
       chrome.runtime.onMessage.addListener(messageListener);
+      console.log('[ScrapeListAndDetails] Message listener added, waiting for scrollComplete/paginationComplete with requestId:', requestId);
 
       // Start list scraping
-      // Need to scrape more to account for skip
+      // Need to scrape MORE to account for skip: skip + limit
+      // Example: skip=100, limit=100 → scrape 200 items, then slice to get items 101-200
       const totalToScrape = skipProducts + maxProducts;
+      console.log(`[ScrapeListAndDetails] Scraping list: skip=${skipProducts}, limit=${maxProducts}, total=${totalToScrape}`);
+      
       const listOptions = {
-        maxProducts: totalToScrape, // Scrape more to account for skip
+        maxProducts: totalToScrape, // Scrape total = skip + limit
         productSelector,
         containerSelector,
         requestId: requestId,
@@ -574,10 +647,12 @@
         } else if (response?.success && response.data) {
           // If list scraping completes immediately (single page, no pagination needed)
           productList = response.data;
-          const productLinks = productList
+          const allProductLinks = productList
             .map(p => p.link || p.url || p.href)
-            .filter(link => link && link.includes('.html'))
-            .slice(0, maxDetails);
+            .filter(link => link && link.includes('.html'));
+          
+          // Apply skip: skip first N items, then take maxDetails items
+          const productLinks = allProductLinks.slice(skipProducts, skipProducts + maxDetails);
 
           if (productLinks.length > 0) {
             chrome.runtime.onMessage.removeListener(messageListener);

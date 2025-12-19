@@ -131,6 +131,9 @@
   // ============================================
   // 📡 MESSAGE LISTENER
   // ============================================
+  // Note: In Chrome extension, messages from content script go to background script first.
+  // If background script processes the message, it may not automatically propagate to popup.
+  // We need to ensure popup listeners can receive messages by not consuming them.
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'downloadFile') {
       return DownloadHandler.handleDownload(request, sendResponse);
@@ -138,10 +141,19 @@
 
     // Forward pagination completion to all tabs (popup might be listening)
     if (request.action === 'paginationComplete') {
-      // Only show badge for standalone list; skip if this is part of 1-click list+detail (requestId starts with listAndDetails_)
       const isListAndDetails = request.requestId && String(request.requestId).startsWith('listAndDetails_');
-      if (!isListAndDetails && sender?.tab?.id) showDoneBadge(sender.tab.id);
-      // Broadcast to all tabs - popup will catch it
+      
+      // For listAndDetails requests, don't show badge and don't consume message
+      // Let message propagate to popup listener
+      if (isListAndDetails) {
+        // Don't process, don't consume - let message reach popup
+        return; // Return undefined - message will propagate to popup
+      }
+      
+      // For standalone list scraping, show badge
+      if (sender?.tab?.id) showDoneBadge(sender.tab.id);
+      
+      // Forward to all tabs (for content scripts that might be listening)
       chrome.tabs.query({}, (tabs) => {
         tabs.forEach(tab => {
           chrome.tabs.sendMessage(tab.id, request).catch(() => {
@@ -149,14 +161,35 @@
           });
         });
       });
-      sendResponse({ success: true });
-      return false;
+      
+      // Don't consume message - let it propagate to popup
+      return; // Return undefined - message will propagate to popup
     }
 
     if (request.action === 'scrollComplete') {
       const isListAndDetails = request.requestId && String(request.requestId).startsWith('listAndDetails_');
-      if (!isListAndDetails && sender?.tab?.id) showDoneBadge(sender.tab.id);
-      return false;
+      
+      // For listAndDetails requests, don't show badge and don't consume message
+      // Let message propagate to popup listener
+      if (isListAndDetails) {
+        // Don't process, don't consume - let message reach popup
+        return; // Return undefined - message will propagate to popup
+      }
+      
+      // For standalone list scraping, show badge
+      if (sender?.tab?.id) showDoneBadge(sender.tab.id);
+      
+      // Forward to all tabs (for content scripts that might be listening)
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, request).catch(() => {
+            // Tab might not have content script, ignore
+          });
+        });
+      });
+      
+      // Don't consume message - let it propagate to popup
+      return; // Return undefined - don't consume, let message propagate
     }
 
     if (request.action === 'detailsScrapingComplete') {
@@ -169,6 +202,19 @@
       if (tabId) {
         clearBadge(tabId);
       }
+      sendResponse({ success: true });
+      return false;
+    }
+
+    if (request.action === 'clearAllBadges') {
+      // Clear badge for all tabs
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          if (tab.id) {
+            clearBadge(tab.id);
+          }
+        });
+      });
       sendResponse({ success: true });
       return false;
     }
@@ -185,7 +231,13 @@
     if (downloadDelta.state && downloadDelta.state.current === 'complete') {
       console.log('✅ Download completed:', downloadDelta.id);
     } else if (downloadDelta.error && downloadDelta.error.current) {
-      console.error('❌ Download error:', downloadDelta.error.current);
+      const error = downloadDelta.error.current;
+      // USER_CANCELED is not an error - user just canceled the download dialog
+      if (error === 'USER_CANCELED') {
+        console.log('ℹ️ Download canceled by user:', downloadDelta.id);
+      } else {
+        console.error('❌ Download error:', error);
+      }
     }
   });
 

@@ -58,6 +58,16 @@
             window.PopupDisplay.displayResults(details, { 
               maxProducts: message.maxProducts || details.length 
             });
+            
+            // Check auto-export setting
+            const autoExportCheckbox = document.getElementById('autoExportCSV');
+            if (autoExportCheckbox && autoExportCheckbox.checked) {
+              console.log('[PopupMain] Auto-export enabled, starting export...');
+              // Delay a bit to ensure UI is ready
+              setTimeout(() => {
+                window.DataScraperExportHandler.exportData('csv', details);
+              }, 500);
+            }
           }
           
           // Hide processing status
@@ -68,8 +78,11 @@
           
           // Chỉ hiện 1 line message ngắn gọn
           const maxProducts = message.maxProducts || details.length;
+          const autoExportMsg = document.getElementById('autoExportCSV')?.checked 
+            ? ' (đang tự động export...)' 
+            : '';
           window.PopupDisplay.showMessage(
-            `✅ Đã scrape thành công ${details.length}/${maxProducts} sản phẩm`, 
+            `✅ Đã scrape thành công ${details.length}/${maxProducts} sản phẩm${autoExportMsg}`, 
             'success'
           );
           

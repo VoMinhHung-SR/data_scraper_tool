@@ -90,19 +90,95 @@
     },
 
     /**
-     * Extract text content safely
-     * @param {Element} element - DOM element
-     * @param {number|null} maxLength - Maximum length to return
+     * Clean text: only keep letters, numbers, currency units, and punctuation
+     * Remove: all emoji, icons, symbols (except allowed ones)
+     * @param {string} text - Text to clean
      * @returns {string}
      */
-    getText: (element, maxLength = null) => {
+    removeEmojiAndIcons: (text) => {
+      if (!text) return '';
+      
+      let cleaned = '';
+      
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const code = char.charCodeAt(0);
+        
+        // Keep ASCII characters (0-127) - includes Latin letters, numbers, basic punctuation
+        if (code <= 127) {
+          cleaned += char;
+          continue;
+        }
+        
+        // Handle surrogate pairs (emoji that use 2 code units) - skip them
+        if (code >= 0xD800 && code <= 0xDBFF && i + 1 < text.length) {
+          const nextCode = text.charCodeAt(i + 1);
+          if (nextCode >= 0xDC00 && nextCode <= 0xDFFF) {
+            // This is a surrogate pair - skip it (it's likely an emoji)
+            i++; // Skip the next character too
+            continue;
+          }
+        }
+        
+        // For non-ASCII characters, only keep:
+        // 1. Vietnamese characters (Latin Extended-A, Latin Extended-B, Latin Extended Additional)
+        // 2. Currency symbols (₫ = 0x20AB, đ = 0x0111, Đ = 0x0110)
+        // 3. Basic punctuation and spaces
+        
+        const isKeep = (
+          // Vietnamese characters: Latin Extended-A (0100-017F) - includes đ, Đ
+          (code >= 0x0100 && code <= 0x017F) ||
+          // Vietnamese characters: Latin Extended-B (0180-024F)
+          (code >= 0x0180 && code <= 0x024F) ||
+          // Vietnamese characters: Latin Extended Additional (1E00-1EFF) - includes ă, â, ê, ô, ơ, ư, etc.
+          (code >= 0x1E00 && code <= 0x1EFF) ||
+          // Currency: ₫ (Vietnamese Dong)
+          (code === 0x20AB) ||
+          // Currency: đ (lowercase d with stroke)
+          (code === 0x0111) ||
+          // Currency: Đ (uppercase D with stroke)
+          (code === 0x0110) ||
+          // Basic punctuation and spaces (2000-206F)
+          (code >= 0x2000 && code <= 0x206F) ||
+          // General punctuation (2E00-2E7F)
+          (code >= 0x2E00 && code <= 0x2E7F)
+        );
+        
+        // Keep if it's in allowed ranges
+        if (isKeep) {
+          cleaned += char;
+        }
+        // Otherwise, skip it (it's emoji/icon/symbol)
+      }
+      
+      // Clean up multiple spaces and trim
+      cleaned = cleaned.replace(/\s+/g, ' ').trim();
+      
+      return cleaned;
+    },
+
+    /**
+     * Extract text content safely (with emoji/icon removal)
+     * @param {Element} element - DOM element
+     * @param {number|null} maxLength - Maximum length to return
+     * @param {boolean} removeEmoji - Whether to remove emoji/icons (default: true)
+     * @returns {string}
+     */
+    getText: (element, maxLength = null, removeEmoji = true) => {
       if (!element) return '';
-      const text = element.textContent?.trim() || '';
+      let text = element.textContent?.trim() || '';
+      
+      // Remove emoji and icons if requested
+      if (removeEmoji) {
+        text = window.DataScraperDOMUtils.removeEmojiAndIcons(text);
+      }
+      
       return maxLength ? text.substring(0, maxLength) : text;
     },
 
     /**
-     * Find container element
+     * Find container element for products
+     * Returns the grid container, but also provides parent container for buttons
      * @param {string|null} containerSelector - Custom container selector
      * @returns {Element}
      */
@@ -147,6 +223,54 @@
       }
       
       return document.body;
+    },
+
+    /**
+     * Find parent container that includes both products and load more button
+     * This is useful when button is outside the product grid
+     * @param {Element} productContainer - The product grid container
+     * @returns {Element} Parent container or original container
+     */
+    findParentContainer: (productContainer) => {
+      if (!productContainer || productContainer === document.body) {
+        return document.body;
+      }
+
+      // Try to find parent section or container that likely contains both products and button
+      const parentSelectors = [
+        'section[class*="product"]',
+        'section[id*="product"]',
+        '[class*="product-section"]',
+        '[id*="product-section"]',
+        'section',
+        'div[class*="container"]'
+      ];
+
+      let current = productContainer.parentElement;
+      let depth = 0;
+      const maxDepth = 5; // Limit search depth
+
+      while (current && depth < maxDepth) {
+        // Check if this parent has both products and potential load more button
+        const hasProducts = current.querySelectorAll('a[href*=".html"]').length > 0;
+        const hasButtons = current.querySelectorAll('button').length > 0;
+        
+        // If parent has both, it's likely the right container
+        if (hasProducts && hasButtons) {
+          // Check if it matches common parent patterns
+          for (const sel of parentSelectors) {
+            if (current.matches(sel)) {
+              return current;
+            }
+          }
+        }
+
+        current = current.parentElement;
+        depth++;
+      }
+
+      // Fallback: return parent of product container (one level up)
+      return productContainer.parentElement || productContainer;
     },
 
     /**

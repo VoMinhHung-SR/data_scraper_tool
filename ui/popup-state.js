@@ -21,9 +21,14 @@
         if (!tab || !tab.id) {
           throw new Error('Không thể truy cập tab hiện tại');
         }
+        
+        // NOTE: Removed URL change detection that clears states
+        // This was causing data loss when closing/reopening tabs
+        // Data is persisted in localStorage and should only be cleared when user clicks "Clear results"
+        
         this.currentTab = tab;
         
-        // Restore saved data
+        // Restore saved data from localStorage
         await this.loadSavedData();
         
         return tab;
@@ -31,6 +36,78 @@
         console.error('Init state error:', error);
         throw error;
       }
+    },
+    
+    /**
+     * Get last URL from storage
+     */
+    getLastUrl: async function() {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(['scraper_last_url'], (result) => {
+          resolve(result.scraper_last_url || null);
+        });
+      });
+    },
+    
+    /**
+     * Save current URL to storage
+     */
+    saveLastUrl: async function(url) {
+      return new Promise((resolve) => {
+        chrome.storage.local.set({ scraper_last_url: url }, () => {
+          resolve();
+        });
+      });
+    },
+    
+    /**
+     * Clear all states (including pagination, detail scraping states)
+     */
+    clearAllStates: function() {
+      // Clear in-memory state
+      this.currentListData = null;
+      this.currentDetailData = null;
+      
+      // Collect ALL scraper-related keys to remove
+      // NOTE: scraper_last_url is NOT cleared - it's used to detect URL changes
+      const keysToRemove = [
+        // PopupState keys
+        this.STORAGE_KEY_LIST,
+        this.STORAGE_KEY_DETAIL,
+        // Detail scraping state (CRITICAL - must be cleared to prevent stuck state)
+        'scrapeDetailsState',
+        // Pagination state
+        'paginationState',
+        // API cache
+        'lastProductDetailAPI',
+        // DataScraperStateManager keys
+        window.DataScraperStateManager?.KEYS?.PAGINATION,
+        window.DataScraperStateManager?.KEYS?.DETAIL_LIST,
+        window.DataScraperStateManager?.KEYS?.API_CACHE,
+        // Additional keys that might exist (but NOT scraper_last_url - needed for URL change detection)
+        'scraper_detail_data',
+        'scraper_list_data'
+      ].filter(Boolean);
+      
+      console.log('[PopupState] Clearing all states, keys to remove:', keysToRemove);
+      
+      // Clear all keys in one operation to avoid race conditions
+      chrome.storage.local.remove(keysToRemove, () => {
+        if (chrome.runtime.lastError) {
+          console.error('[PopupState] Error clearing states:', chrome.runtime.lastError);
+        } else {
+          console.log('[PopupState] Successfully cleared all states');
+        }
+        
+        // Double-check: Also call DataScraperStateManager.clearAll to ensure nothing is missed
+        if (window.DataScraperStateManager && window.DataScraperStateManager.clearAll) {
+          window.DataScraperStateManager.clearAll().then(() => {
+            console.log('[PopupState] DataScraperStateManager.clearAll completed');
+          }).catch(err => {
+            console.error('[PopupState] Error in DataScraperStateManager.clearAll:', err);
+          });
+        }
+      });
     },
 
     /**
@@ -122,19 +199,78 @@
      */
     saveDetailData: function(data) {
       if (data && Array.isArray(data) && data.length > 0) {
-        chrome.storage.local.set({ 
-          [this.STORAGE_KEY_DETAIL]: {
-            data: data,
-            timestamp: Date.now(),
-            count: data.length,
-            type: 'detail'
-          }
-        }, () => {
-          if (chrome.runtime.lastError) {
-            console.error('Error saving detail data:', chrome.runtime.lastError);
-          }
-        });
+        // Check storage quota before saving
+        if (chrome.storage.local.getBytesInUse) {
+          chrome.storage.local.getBytesInUse(null, (bytesInUse) => {
+            const quota = chrome.storage.local.QUOTA_BYTES || 10 * 1024 * 1024;
+            const estimatedSize = JSON.stringify(data).length;
+            
+            if (bytesInUse + estimatedSize > quota * 0.9) {
+              console.warn('[PopupState] Storage nearly full, cleaning old data...');
+              this._cleanupOldData(() => {
+                this._saveDetailDataInternal(data);
+              });
+            } else {
+              this._saveDetailDataInternal(data);
+            }
+          });
+        } else {
+          this._saveDetailDataInternal(data);
+        }
       }
+    },
+
+    /**
+     * Internal save detail data
+     */
+    _saveDetailDataInternal: function(data) {
+      chrome.storage.local.set({ 
+        [this.STORAGE_KEY_DETAIL]: {
+          data: data,
+          timestamp: Date.now(),
+          count: data.length,
+          type: 'detail'
+        }
+      }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Error saving detail data:', chrome.runtime.lastError);
+          window.PopupDisplay?.showMessage('Cảnh báo: Không thể lưu dữ liệu vào storage. Vui lòng export ngay.', 'error');
+        }
+      });
+    },
+
+    /**
+     * Cleanup old data (>24h)
+     */
+    _cleanupOldData: function(callback) {
+      chrome.storage.local.get([this.STORAGE_KEY_LIST, this.STORAGE_KEY_DETAIL], (result) => {
+        const now = Date.now();
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+        const keysToRemove = [];
+
+        if (result[this.STORAGE_KEY_LIST]) {
+          const age = now - result[this.STORAGE_KEY_LIST].timestamp;
+          if (age > maxAge) {
+            keysToRemove.push(this.STORAGE_KEY_LIST);
+          }
+        }
+
+        if (result[this.STORAGE_KEY_DETAIL]) {
+          const age = now - result[this.STORAGE_KEY_DETAIL].timestamp;
+          if (age > maxAge) {
+            keysToRemove.push(this.STORAGE_KEY_DETAIL);
+          }
+        }
+
+        if (keysToRemove.length > 0) {
+          chrome.storage.local.remove(keysToRemove, () => {
+            console.log('[PopupState] Cleaned up old data:', keysToRemove);
+            if (callback) callback();
+          });
+        } else {
+          if (callback) callback();
+        }
+      });
     },
 
     /**
@@ -181,34 +317,24 @@
      * Clear state and storage
      */
     clear: function() {
-      this.currentListData = null;
-      this.currentDetailData = null;
+      // Use clearAllStates to ensure all states are cleared
+      this.clearAllStates();
       
-      // Clear all scraper-related states
-      const keysToRemove = [
-        this.STORAGE_KEY_LIST,
-        this.STORAGE_KEY_DETAIL,
-        'scrapeDetailsState',  // State for productDetailsFromList scraping
-        'paginationState',     // State for pagination scraping
-        'lastProductDetailAPI' // Cached API response
-      ];
-      
-      chrome.storage.local.remove(keysToRemove, () => {
-        // Also clear states managed by DataScraperStateManager
-        if (window.DataScraperStateManager && window.DataScraperStateManager.clearAll) {
-          window.DataScraperStateManager.clearAll();
+      // Clear badge in background script - clear for all tabs
+      chrome.runtime.sendMessage({
+        action: 'clearAllBadges'
+      }).catch((err) => {
+        console.warn('[PopupState] Error clearing badges:', err);
+        // Fallback: try to clear badge for current tab only
+        if (this.currentTab && this.currentTab.id) {
+          chrome.runtime.sendMessage({
+            action: 'clearBadge',
+            tabId: this.currentTab.id
+          }).catch(() => {
+            // Background script might not be ready, ignore
+          });
         }
       });
-      
-      // Clear badge in background script
-      if (this.currentTab && this.currentTab.id) {
-        chrome.runtime.sendMessage({
-          action: 'clearBadge',
-          tabId: this.currentTab.id
-        }).catch(() => {
-          // Background script might not be ready, ignore
-        });
-      }
       
       if (this.messageTimeout) {
         clearTimeout(this.messageTimeout);

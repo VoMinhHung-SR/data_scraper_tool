@@ -325,8 +325,8 @@
           // Fallback: tìm từ specifications hoặc regex (giới hạn độ dài)
           if (!packageSize) {
             const packageMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*(x\s*)?\d+[^\s]*/i);
-            if (packageMatch) {
-              packageSize = packageMatch[0].trim();
+          if (packageMatch) {
+            packageSize = packageMatch[0].trim();
             }
           }
         }
@@ -1308,7 +1308,17 @@
   // 🔄 PAGINATION STATE RECOVERY
   // ============================================
   // Check if we need to continue pagination from previous page
-  chrome.storage.local.get(['paginationState'], (result) => {
+  chrome.storage.local.get(['paginationState', 'scraper_last_url'], (result) => {
+    // Check if URL changed - if so, clear pagination state
+    const currentUrl = window.location.href;
+    const lastUrl = result.scraper_last_url;
+    if (lastUrl && lastUrl !== currentUrl && result.paginationState) {
+      console.log('[Content] URL changed, clearing pagination state');
+      chrome.storage.local.remove(['paginationState']);
+      chrome.storage.local.set({ scraper_last_url: currentUrl });
+      return;
+    }
+    
     if (result.paginationState) {
       const state = result.paginationState;
       
@@ -1397,6 +1407,7 @@
 
           const currentCount = products.size;
 
+          // Skip is already applied during scraping, so just take maxProducts
           if (currentCount >= maxProducts || currentPage >= maxPages) {
             chrome.storage.local.remove(['paginationState']);
             const finalProducts = Array.from(products.values()).slice(0, maxProducts);
@@ -1415,7 +1426,7 @@
           const nextButton = Utils.findNextPageButton(nextPageSelector);
           if (!nextButton) {
             chrome.storage.local.remove(['paginationState']);
-            const finalProducts = Array.from(products.values());
+            const finalProducts = Array.from(products.values()).slice(0, maxProducts);
             
             chrome.runtime.sendMessage({
               action: 'paginationComplete',
@@ -1462,6 +1473,9 @@
         });
       }
     }
+    
+    // Save current URL for state management
+    chrome.storage.local.set({ scraper_last_url: window.location.href });
   });
 
 })();

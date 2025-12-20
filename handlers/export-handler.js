@@ -34,6 +34,12 @@
      */
     _resetExportState: function() {
       this.isExporting = false;
+      
+      // Re-enable auto-export checkbox
+      const autoExportCheckbox = document.getElementById('autoExportCSV');
+      if (autoExportCheckbox) {
+        autoExportCheckbox.disabled = false;
+      }
     },
 
     /**
@@ -53,6 +59,37 @@
     },
 
     /**
+     * Helper: Safely revoke blob URL
+     */
+    _revokeBlobURL: function(blobUrl, delay = 100) {
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(blobUrl);
+        } catch (e) {
+          console.warn('[ExportHandler] Error revoking blob URL:', e);
+        }
+      }, delay);
+    },
+
+    /**
+     * Helper: Show download in browser manager (optional, may crash in popup/Brave)
+     */
+    _showDownloadInManager: function(downloadId) {
+      if (!this.ENABLE_DOWNLOADS_SHOW || downloadId === undefined || downloadId === null) {
+        return;
+      }
+      
+      if (typeof chrome.downloads?.show === 'function') {
+        try {
+          chrome.downloads.show(downloadId);
+          console.log('[ExportHandler] ✅ chrome.downloads.show called successfully');
+        } catch (e) {
+          console.warn('[ExportHandler] ⚠️  Error calling chrome.downloads.show:', e);
+        }
+      }
+    },
+
+    /**
      * Helper: Download via Chrome Downloads API (Manifest V3 standard)
      */
     _downloadViaChromeAPI: function(content, filename, mimeType, format, callback) {
@@ -67,164 +104,68 @@
         const sizeInMB = blob.size / (1024 * 1024);
         console.log(`[ExportHandler] Downloading via Chrome API, size: ${sizeInMB.toFixed(2)}MB`);
         
-        // Validate inputs before calling chrome.downloads.download
-        if (!blobUrl || typeof blobUrl !== 'string' || !blobUrl.startsWith('blob:')) {
-          throw new Error(`Invalid blobUrl: ${blobUrl}`);
+        // Validate inputs
+        if (!blobUrl?.startsWith('blob:') || !filename?.trim()) {
+          throw new Error(`Invalid blobUrl or filename`);
         }
         
-        if (!filename || typeof filename !== 'string' || filename.trim() === '') {
-          throw new Error(`Invalid filename: ${filename}`);
-        }
-        
-        // Check if chrome.downloads API is available
-        if (typeof chrome === 'undefined' || typeof chrome.downloads === 'undefined') {
+        if (typeof chrome?.downloads?.download !== 'function') {
           throw new Error('chrome.downloads API is not available');
         }
         
-        if (typeof chrome.downloads.download !== 'function') {
-          throw new Error('chrome.downloads.download is not a function');
-        }
-        
-        // Use chrome.downloads.download (Manifest V3 standard - no DOM hack)
-        console.log('[ExportHandler] Calling chrome.downloads.download with:', {
-          filename,
-          urlType: typeof blobUrl,
-          urlPreview: blobUrl.substring(0, 50) + '...',
-          blobSize: blob.size,
-          hasChromeDownloads: typeof chrome.downloads !== 'undefined',
-          hasDownloadFunction: typeof chrome.downloads?.download === 'function'
-        });
-        
-        // Wrap in try-catch to catch any synchronous errors
-        // NOTE: In popup context, chrome.downloads.download may crash if called immediately
-        // Use setTimeout to defer the call and avoid crash
+        // Defer call to avoid crash in popup context
         const callDownload = () => {
           try {
-            console.log('[ExportHandler] About to call chrome.downloads.download...');
             chrome.downloads.download({
               url: blobUrl,
               filename: filename,
-              saveAs: true,
-              conflictAction: 'uniquify' // Auto-rename if file exists
+              saveAs: false,
+              conflictAction: 'uniquify'
             }, (downloadId) => {
-          if (chrome.runtime.lastError) {
-            const errorMsg = chrome.runtime.lastError.message;
-            if (errorMsg.includes('USER_CANCELED')) {
-              console.log('[ExportHandler] User canceled download');
-              // Revoke URL even if canceled
-              setTimeout(() => {
-                try {
-                  URL.revokeObjectURL(blobUrl);
-                } catch (e) {
-                  console.warn('[ExportHandler] Error revoking blob URL:', e);
-                }
-              }, 100);
-              downloadCallback();
-            } else {
-              console.error('[ExportHandler] Download error:', errorMsg);
-              // Revoke URL on error
-              setTimeout(() => {
-                try {
-                  URL.revokeObjectURL(blobUrl);
-                } catch (e) {
-                  console.warn('[ExportHandler] Error revoking blob URL:', e);
-                }
-              }, 100);
-              this._handleError(new Error(errorMsg), 'Lỗi khi tải xuống', downloadCallback);
-            }
-          } else {
-            console.log('[ExportHandler] Download started successfully:', filename, 'ID:', downloadId);
-            
-            // Try to show download in browser's download manager
-            // This may help trigger the save dialog if saveAs didn't work
-            // NOTE: chrome.downloads.show can crash in some contexts (popup, Brave browser)
-            // So we validate downloadId and wrap in extensive error handling
-            // Set ENABLE_DOWNLOADS_SHOW to false to disable this feature completely
-            if (this.ENABLE_DOWNLOADS_SHOW && downloadId !== undefined && downloadId !== null) {
-              console.log('[ExportHandler] Attempting to show download in manager, downloadId:', downloadId, 'type:', typeof downloadId);
-              
-              // Check if chrome.downloads.show is available
-              if (typeof chrome.downloads !== 'undefined' && typeof chrome.downloads.show === 'function') {
-                try {
-                  console.log('[ExportHandler] Calling chrome.downloads.show...');
-                  chrome.downloads.show(downloadId);
-                  console.log('[ExportHandler] ✅ chrome.downloads.show called successfully');
-                } catch (e) {
-                  console.warn('[ExportHandler] ⚠️  Error calling chrome.downloads.show:', e);
-                  console.warn('[ExportHandler] Error details:', {
-                    name: e?.name,
-                    message: e?.message,
-                    stack: e?.stack?.substring(0, 200)
-                  });
-                  // Don't throw - this is optional functionality
+              if (chrome.runtime.lastError) {
+                const errorMsg = chrome.runtime.lastError.message;
+                this._revokeBlobURL(blobUrl);
+                
+                if (errorMsg.includes('USER_CANCELED')) {
+                  console.log('[ExportHandler] User canceled download');
+                  downloadCallback();
+                } else {
+                  this._handleError(new Error(errorMsg), 'Lỗi khi tải xuống', downloadCallback);
                 }
               } else {
-                console.warn('[ExportHandler] ⚠️  chrome.downloads.show not available');
+                console.log('[ExportHandler] Download started successfully:', filename, 'ID:', downloadId);
+                
+                // Try to show download in manager (optional)
+                this._showDownloadInManager(downloadId);
+                
+                // Show success message
+                window.PopupDisplay?.showMessage(
+                  `📥 Đang tải xuống: ${filename}...\n💡 Kiểm tra thư mục Downloads hoặc click icon download ở góc trên trình duyệt`,
+                  'loading'
+                );
+                
+                // Revoke blob URL after download completes (30s delay)
+                this._revokeBlobURL(blobUrl, 30000);
+                downloadCallback();
               }
-            } else {
-              if (!this.ENABLE_DOWNLOADS_SHOW) {
-                console.log('[ExportHandler] ℹ️  chrome.downloads.show is disabled (ENABLE_DOWNLOADS_SHOW=false)');
-              } else {
-                console.warn('[ExportHandler] ⚠️  Invalid downloadId, skipping chrome.downloads.show:', downloadId);
-              }
-            }
-            
-            // Show success message
-            window.PopupDisplay?.showMessage(
-              `📥 Đang tải xuống: ${filename}...\n💡 Kiểm tra thư mục Downloads hoặc click icon download ở góc trên trình duyệt`,
-              'loading'
-            );
-            
-            // Revoke blob URL after download completes
-            // Use longer delay to ensure download completes (even if user takes time to choose folder)
-            const revokeDelay = 30000; // 30 seconds - enough time for user to interact with save dialog
-            setTimeout(() => {
-              try {
-                URL.revokeObjectURL(blobUrl);
-                console.log('[ExportHandler] Blob URL revoked after download');
-              } catch (e) {
-                console.warn('[ExportHandler] Error revoking blob URL:', e);
-              }
-            }, revokeDelay);
-            
-            downloadCallback();
-          }
-        });
-          } catch (syncError) {
-            // Catch any synchronous errors from chrome.downloads.download call itself
-            console.error('[ExportHandler] ❌ Synchronous error calling chrome.downloads.download:', syncError);
-            console.error('[ExportHandler] Error details:', {
-              name: syncError?.name,
-              message: syncError?.message,
-              stack: syncError?.stack?.substring(0, 500)
             });
-            
-            // Cleanup blob URL
-            try {
-              URL.revokeObjectURL(blobUrl);
-            } catch (revokeError) {
-              console.warn('[ExportHandler] Error revoking blob URL after sync error:', revokeError);
-            }
-            
+          } catch (syncError) {
+            this._revokeBlobURL(blobUrl);
             this._handleError(syncError, 'Lỗi khi gọi chrome.downloads.download', downloadCallback);
           }
         };
         
-        // Defer the call to avoid crash in popup context
-        // Small delay allows popup to stabilize before calling download API
-        const delay = 50; // 50ms delay
-        console.log(`[ExportHandler] Scheduling chrome.downloads.download call in ${delay}ms...`);
-        setTimeout(() => {
-          callDownload();
-        }, delay);
+        // Defer call by 50ms to avoid crash in popup context
+        setTimeout(callDownload, 50);
       } catch (error) {
-        console.error('[ExportHandler] ❌ Outer catch - Error in _downloadViaChromeAPI:', error);
         this._handleError(error, 'Lỗi khi tạo file download', downloadCallback);
       }
     },
 
     /**
      * Main export function
+     * @param {string} format - 'csv' or 'json', or null to show format selection modal
+     * @param {Array} data - Data to export
      */
     exportData: function(format, data) {
       // Early validation
@@ -246,6 +187,37 @@
         return;
       }
 
+      // If format is not provided, check for manual format or show modal
+      if (!format) {
+        chrome.storage.local.get(['currentExportBatch', 'manualExportFormat'], (result) => {
+          // If auto-export batch, use CSV format directly (no modal)
+          if (result.currentExportBatch) {
+            console.log('[ExportHandler] Auto-export detected, using CSV format directly (no modal)');
+            this.exportData('csv', data);
+            return;
+          }
+          
+          // If manual format was selected (from 1click), use it (no modal)
+          if (result.manualExportFormat) {
+            console.log('[ExportHandler] Manual format detected, using:', result.manualExportFormat);
+            // Clear manual format after use
+            chrome.storage.local.remove(['manualExportFormat'], () => {
+              this.exportData(result.manualExportFormat, data);
+            });
+            return;
+          }
+          
+          // Otherwise show modal for manual export (user clicked export button manually)
+          const formatModal = document.getElementById('exportFormatModal');
+          if (formatModal) {
+            formatModal.style.display = 'flex';
+            // Store data for later use
+            this._pendingExportData = data;
+          }
+        });
+        return;
+      }
+
       // Validate data
       let validation;
       try {
@@ -260,30 +232,35 @@
         return;
       }
 
-      // Warn for large datasets
-      if (data.length > 1000) {
-        if (!confirm(`Bạn đang export ${data.length} items. Điều này có thể tạo nhiều file và mất thời gian.\n\nBạn có muốn tiếp tục không?`)) {
-          return;
-        }
-      }
-
       this.isExporting = true;
 
-      // Split CSV files if > 300 items (safe limit for Chrome extension)
-      if (format === 'csv' && data.length > 300) {
-        window.PopupDisplay?.showMessage(`Đang chia ${data.length} items thành ${Math.ceil(data.length / this.ITEMS_PER_FILE)} files...`, 'loading');
+      // Disable auto-export checkbox while exporting
+      const autoExportCheckbox = document.getElementById('autoExportCSV');
+      if (autoExportCheckbox) {
+        autoExportCheckbox.disabled = true;
+      }
+
+      // Split files if > 100 items (for CSV only)
+      if (format === 'csv' && data.length > this.ITEMS_PER_FILE) {
+        const totalFiles = Math.ceil(data.length / this.ITEMS_PER_FILE);
+        window.PopupDisplay?.showMessage(`Đang chia ${data.length} items thành ${totalFiles} files...`, 'loading');
+        console.log(`[ExportHandler] Splitting ${data.length} items into ${totalFiles} files`);
+        
         setTimeout(() => {
           try {
             this.exportCSVMultipleFiles(data);
           } catch (error) {
             this._handleError(error, 'Lỗi khi export nhiều file');
+            if (autoExportCheckbox) autoExportCheckbox.disabled = false;
           }
-        }, 100);
+        }, 1000);
         return;
       }
 
-      // Single file export (for JSON or CSV <= 300 items)
-      this._exportSingleFile(format, data);
+      // Single file export
+      setTimeout(() => {
+        this._exportSingleFile(format, data);
+      }, 1000);
     },
 
     /**
@@ -296,12 +273,16 @@
       
       let exportContent;
       try {
-        exportContent = this.generateExportContent(format, data);
+        // For single file: startIndex = 0 (will be converted to 1 in generateExportContent)
+        // endIndex = data.length (actual number of items)
+        exportContent = this.generateExportContent(format, data, 0, data.length);
         console.log('[ExportHandler] Content generated:', {
           hasContent: !!exportContent?.content,
           contentLength: exportContent?.content?.length || 0,
           filename: exportContent?.filename,
-          mimeType: exportContent?.mimeType
+          mimeType: exportContent?.mimeType,
+          startIndex: 1,
+          endIndex: data.length
         });
       } catch (error) {
         console.error('[ExportHandler] Error generating content:', error);
@@ -329,8 +310,31 @@
       }
 
       const downloadCallback = this._createDownloadCallback(() => {
-        window.PopupDisplay?.showMessage(`Đã export thành công: ${filename}`, 'success');
-        setTimeout(() => this.closeModal(), 1000);
+        // Extract range from filename or use data length
+        const match = filename.match(/-(\d+)-(\d+)\./);
+        const lastExportedIndex = match ? parseInt(match[2]) : data.length;
+        
+        // Show modal first
+        this._showExportCompleteModal([{ filename, format }], data.length);
+        
+        // Save state after delay (2s for single file)
+        setTimeout(() => {
+          if (lastExportedIndex > 0) {
+            this._saveExportState(lastExportedIndex).then(() => {
+              // Check if workflow complete
+              chrome.storage.local.get(['scraper_export_state'], (result) => {
+                const state = result.scraper_export_state || {};
+                if (state.totalLimit && lastExportedIndex >= state.totalLimit) {
+                  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                    if (tabs?.[0]?.id) {
+                      chrome.runtime.sendMessage({ action: 'workflowComplete' });
+                    }
+                  });
+                }
+              });
+            });
+          }
+        }, 2000);
       });
 
       // Large files: always use Chrome Downloads API (no DOM hack)
@@ -379,26 +383,109 @@
     /**
      * Generate export content
      */
-    generateExportContent: function(format, data) {
+    generateExportContent: function(format, data, startIndex = 0, endIndex = null) {
+      const categorySlug = this._extractCategorySlug(data);
+      // endIndex should be actual number of items, not limit
+      const actualEndIndex = endIndex !== null ? endIndex : data.length;
+      // startIndex should start from 1, not 0
+      const actualStartIndex = startIndex + 1;
+      
+      // Always include index range in filename
+      const indexSuffix = `-${actualStartIndex}-${actualEndIndex}`;
+      
       if (format === 'json') {
         const content = JSON.stringify(data, null, 2);
+        const filename = categorySlug 
+          ? `scraped-data-${categorySlug}${indexSuffix}.json`
+          : `scraped-data${indexSuffix}.json`;
         return {
           content: content,
-          filename: `scraped-data-${Date.now()}.json`,
+          filename: filename,
           mimeType: 'application/json'
         };
       }
       
       if (format === 'csv') {
         const content = this.convertToCSV(data);
+        const filename = categorySlug 
+          ? `scraped-data-${categorySlug}${indexSuffix}.csv`
+          : `scraped-data${indexSuffix}.csv`;
         return {
           content: content,
-          filename: `scraped-data-${Date.now()}.csv`,
+          filename: filename,
           mimeType: 'text/csv'
         };
       }
       
       return null;
+    },
+
+    /**
+     * Helper: Normalize text to slug format
+     */
+    _normalizeToSlug: function(text) {
+      return text.toLowerCase()
+        .replace(/[,\s]+/g, '-')
+        .replace(/[^a-z0-9\-]/g, '')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    },
+
+    /**
+     * Extract category slug from data
+     * Converts "Thuốc/Thuốc giải độc, khử độc và hỗ trợ cai nghiện" 
+     * to "thuoc-thuocgiaidoc-khudoc-hotrocainghien"
+     */
+    _extractCategorySlug: function(data) {
+      if (!data?.length) return '';
+      
+      const firstItem = data[0];
+      if (!firstItem) return '';
+      
+      // Priority 1: Use categorySlug if available
+      if (firstItem.categorySlug) {
+        return firstItem.categorySlug
+          .split(/[\/>]/)
+          .map(c => this._normalizeToSlug(c.trim()))
+          .filter(c => c)
+          .join('-');
+      }
+      
+      // Priority 2: Extract from categoryPath
+      if (firstItem.categoryPath) {
+        return firstItem.categoryPath
+          .split(/[\/>]/)
+          .map(c => c.trim())
+          .filter(c => c && !c.match(/trang\s+chủ|homepage/i))
+          .map(c => this._normalizeToSlug(c))
+          .join('-');
+      }
+      
+      // Priority 3: Extract from category array
+      if (Array.isArray(firstItem.category) && firstItem.category.length > 0) {
+        return firstItem.category
+          .map(c => this._normalizeToSlug((c.slug || c.name || c).toString()))
+          .filter(c => c)
+          .join('-');
+      }
+      
+      // Priority 4: Extract from URL
+      if (firstItem.link) {
+        try {
+          const url = new URL(firstItem.link);
+          const pathParts = url.pathname.split('/')
+            .filter(p => p && !p.includes('.html') && !p.includes('.'));
+          if (pathParts.length > 0) {
+            return pathParts
+              .map(p => this._normalizeToSlug(p))
+              .join('-');
+          }
+        } catch (e) {
+          // Ignore invalid URLs
+        }
+      }
+      
+      return '';
     },
 
     /**
@@ -413,12 +500,17 @@
       let currentFile = 0;
       let isCancelled = false;
       
+      const downloadedFiles = [];
+      
       const downloadNext = () => {
         if (isCancelled || currentFile >= totalFiles) {
           if (currentFile >= totalFiles) {
-            this._resetExportState();
-            window.PopupDisplay?.showMessage(`Đã export thành công ${totalFiles} files!`, 'success');
-            setTimeout(() => this.closeModal(), 2000);
+            // All files downloaded, delay a bit to ensure all downloads complete
+            console.log(`[ExportHandler] All ${totalFiles} files downloaded, waiting before saving state...`);
+            setTimeout(() => {
+              this._resetExportState();
+              this._showExportCompleteModal(downloadedFiles, data.length);
+            }, 2000); // 2 second delay to ensure all downloads complete
           }
           return;
         }
@@ -444,7 +536,15 @@
         const end = Math.min(start + this.ITEMS_PER_FILE, data.length);
         const chunk = data.slice(start, end);
         const fileNumber = currentFile + 1;
-        const filename = `scraped-data-${Date.now()}-(${fileNumber}).csv`;
+        
+        // Generate filename with category slug
+        // startIndex should start from 1, endIndex should be actual number of items
+        const categorySlug = this._extractCategorySlug(data);
+        const actualStartIndex = start + 1; // Start from 1, not 0
+        const actualEndIndex = end; // End is actual number of items
+        const filename = categorySlug 
+          ? `scraped-data-${categorySlug}-${actualStartIndex}-${actualEndIndex}.csv`
+          : `scraped-data-${actualStartIndex}-${actualEndIndex}.csv`;
         
         console.log(`[ExportHandler] Exporting file ${fileNumber}/${totalFiles} (items ${start}-${end-1})`);
         window.PopupDisplay?.showMessage(`Đang export file ${fileNumber}/${totalFiles}...`, 'loading');
@@ -452,39 +552,41 @@
         setTimeout(() => {
           if (isCancelled) return;
           
+          // Helper to handle chunk error and continue
+          const handleChunkError = () => {
+            currentFile++;
+            if (currentFile >= totalFiles) this._resetExportState();
+            setTimeout(downloadNext, 200);
+          };
+          
           let content;
           try {
             content = this._convertChunkToCSV(headers, chunk);
           } catch (error) {
             console.error(`[ExportHandler] Error converting chunk ${fileNumber}:`, error);
-            currentFile++;
-            if (currentFile >= totalFiles) this._resetExportState();
-            setTimeout(downloadNext, 200);
+            handleChunkError();
             return;
           }
           
           if (!content) {
             console.warn(`[ExportHandler] Empty content for file ${fileNumber}`);
-            currentFile++;
-            if (currentFile >= totalFiles) this._resetExportState();
-            setTimeout(downloadNext, 200);
+            handleChunkError();
             return;
           }
           
           try {
             this._downloadViaChromeAPI(content, filename, 'text/csv', 'csv', () => {
+              downloadedFiles.push({ filename, format: 'csv' });
               if (!isCancelled) {
                 currentFile++;
-                setTimeout(downloadNext, 2500);
+                setTimeout(downloadNext, 3000); // Delay between files
               } else {
                 this._resetExportState();
               }
             });
           } catch (error) {
             console.error(`[ExportHandler] Error downloading file ${fileNumber}:`, error);
-            currentFile++;
-            if (currentFile >= totalFiles) this._resetExportState();
-            setTimeout(downloadNext, 200);
+            handleChunkError();
           }
         }, 50);
       };
@@ -545,6 +647,7 @@
         prices: item.prices || [],
         priceObj: item.priceObj || null,
         priceValue: item.priceValue || 0,
+        packageOptions: Array.isArray(item.packageOptions) ? item.packageOptions : (Array.isArray(item.pricing?.packageOptions) ? item.pricing.packageOptions : []),
         productRanking: item.productRanking || 0,
         displayCode: item.displayCode || 1,
         isPublish: item.isPublish !== undefined ? item.isPublish : true
@@ -807,19 +910,6 @@
       return rowString;
     },
 
-    /**
-     * Join rows in batches
-     */
-    _joinRows: function(rows) {
-      const JOIN_BATCH = 100;
-      const resultParts = [];
-      
-      for (let i = 0; i < rows.length; i += JOIN_BATCH) {
-        resultParts.push(rows.slice(i, i + JOIN_BATCH).join('\n'));
-      }
-      
-      return resultParts.join('\n');
-    },
 
     /**
      * Flatten a single item
@@ -878,9 +968,21 @@
             if (value === null || value === undefined) {
               flattened[newKey] = '';
             } else if (Array.isArray(value)) {
-              flattened[newKey] = value.length > 500 
-                ? `[Array(${value.length})]`
-                : this._stringifyArray(value);
+              // Special handling for packageOptions - format as readable string
+              if (key === 'packageOptions' && value.length > 0) {
+                const formatted = value.map(opt => {
+                  const parts = [];
+                  if (opt.unitDisplay) parts.push(opt.unitDisplay);
+                  if (opt.priceDisplay) parts.push(opt.priceDisplay);
+                  if (opt.specification) parts.push(`(${opt.specification})`);
+                  return parts.join(' ');
+                }).join(' | ');
+                flattened[newKey] = formatted;
+              } else {
+                flattened[newKey] = value.length > 500 
+                  ? `[Array(${value.length})]`
+                  : this._stringifyArray(value);
+              }
             } else if (typeof value === 'object') {
               const nested = this._flattenObject(value, newKey, depth + 1, maxDepth, visited);
               if (nested && typeof nested === 'object') {
@@ -997,14 +1099,214 @@
 
 
     /**
-     * Close modal
+     * Show export complete modal
      */
-    closeModal: function() {
-      const resultsModal = document.getElementById('resultsModal');
-      if (resultsModal) {
-        resultsModal.style.display = 'none';
-        resultsModal.classList.remove('active');
+    _showExportCompleteModal: function(files, totalItems = null) {
+      // Check if this is auto-export - if so, only show success message, no modal
+      chrome.storage.local.get(['currentExportBatch', 'autoExportEnabled'], (result) => {
+        const isAutoExport = result.currentExportBatch !== undefined;
+        const autoExportEnabled = result.autoExportEnabled === true || result.autoExportEnabled === undefined;
+        
+        if (isAutoExport && autoExportEnabled) {
+          // Auto-export: only show success message, no modal
+          const fileCount = files.length;
+          const firstFile = files[0]?.filename || '';
+          const lastFile = files[files.length - 1]?.filename || '';
+          const firstMatch = firstFile.match(/-(\d+)-(\d+)\./);
+          const lastMatch = lastFile.match(/-(\d+)-(\d+)\./);
+          let exportedRange = '';
+          if (firstMatch && lastMatch) {
+            exportedRange = ` (items ${firstMatch[1]}-${lastMatch[2]})`;
+          }
+          
+          window.PopupDisplay?.showMessage(
+            `✅ Đã tự động export thành công ${fileCount} file${fileCount > 1 ? 's' : ''}${exportedRange}${totalItems ? ` / Tổng: ${totalItems} items` : ''}`,
+            'success'
+          );
+          return;
+        }
+        
+        // Manual export: show modal as before
+        const modal = document.getElementById('exportCompleteModal');
+        const infoDiv = document.getElementById('exportCompleteInfo');
+        
+        if (!modal || !infoDiv) {
+          // Fallback to simple message
+          window.PopupDisplay?.showMessage(
+            `Đã export thành công ${files.length} file(s)!`,
+            'success'
+          );
+          return;
+        }
+
+        const fileCount = files.length;
+      
+      // Get default download folder (browser's default)
+      const downloadFolder = 'thư mục Downloads mặc định của trình duyệt';
+      
+      // Calculate exported range from filenames and save state
+      let exportedRange = '';
+      let lastExportedIndex = 0;
+      
+      if (files.length > 0) {
+        const firstFile = files[0].filename;
+        const lastFile = files[files.length - 1].filename;
+        // Extract range from filename: scraped-data-category-1-100.csv
+        const firstMatch = firstFile.match(/-(\d+)-(\d+)\./);
+        const lastMatch = lastFile.match(/-(\d+)-(\d+)\./);
+        if (firstMatch && lastMatch) {
+          const startIndex = parseInt(firstMatch[1]);
+          const endIndex = parseInt(lastMatch[2]);
+          exportedRange = `${startIndex}-${endIndex}`;
+          lastExportedIndex = endIndex;
+        }
       }
-    }
+      
+        // Save export state with delay to ensure files are saved (3 seconds for multiple files)
+        // Check if this is a batch export (auto-export mỗi 100 items)
+        chrome.storage.local.get(['currentExportBatch'], (batchResult) => {
+          const batchInfo = batchResult.currentExportBatch;
+          let exportIndex = lastExportedIndex;
+          
+          // If batch export, use batch endIndex
+          if (batchInfo && batchInfo.endIndex) {
+            exportIndex = batchInfo.endIndex;
+            console.log(`[ExportHandler] Batch export detected, using endIndex: ${exportIndex}`);
+          }
+          
+          if (exportIndex > 0) {
+            const delay = fileCount > 1 ? 3000 : 2000; // Longer delay for multiple files
+            setTimeout(() => {
+              this._saveExportState(exportIndex).then(() => {
+                // Clear batch info after saving state
+                if (batchInfo) {
+                  chrome.storage.local.remove(['currentExportBatch'], () => {
+                    console.log('[ExportHandler] Cleared batch info after export');
+                    
+                    // Clear exported batch from scrapeDetailsState
+                    chrome.storage.local.get(['scrapeDetailsState'], (stateResult) => {
+                      if (stateResult.scrapeDetailsState) {
+                        const state = stateResult.scrapeDetailsState;
+                        // Remove exported batch from details (keep only unexported items)
+                        if (state.details && state.details.length > exportIndex) {
+                          state.details = state.details.slice(exportIndex);
+                          chrome.storage.local.set({ scrapeDetailsState: state }, () => {
+                            console.log(`[ExportHandler] Cleared exported batch, remaining: ${state.details.length} items`);
+                          });
+                        }
+                      }
+                    });
+                  });
+                }
+                // State saved, workflowComplete will be triggered in _saveExportState if limit reached
+              });
+            }, delay);
+          }
+        });
+        
+        infoDiv.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <strong>✅ Đã xuất thành công:</strong> ${fileCount} file${fileCount > 1 ? 's' : ''}
+            ${exportedRange ? ` (items ${exportedRange})` : ''}
+            ${totalItems ? ` / Tổng: ${totalItems} items` : ''}
+          </div>
+          <div style="margin-bottom: 15px;">
+            <strong>📁 Đường dẫn folder:</strong><br>
+            <span style="color: #666; font-size: 12px;">${downloadFolder}</span>
+          </div>
+        `;
+        
+        modal.style.display = 'flex';
+        
+        // Clear data after export
+        this._clearDataAfterExport();
+      }); // End of chrome.storage.local.get callback
+    },
+
+    /**
+     * Save export state for continuation
+     */
+    _saveExportState: function(lastExportedIndex) {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(['scraper_export_state'], (result) => {
+          const currentState = result.scraper_export_state || {};
+          const newState = {
+            lastExportedIndex: lastExportedIndex,
+            totalLimit: currentState.totalLimit || null, // Keep total limit if exists
+            timestamp: Date.now()
+          };
+          
+          chrome.storage.local.set({ scraper_export_state: newState }, () => {
+            console.log('[ExportHandler] Saved export state:', newState);
+            
+            // Check if we've reached total limit
+            if (currentState.totalLimit && lastExportedIndex >= currentState.totalLimit) {
+              console.log('[ExportHandler] Reached total limit, clearing export state');
+              this.clearExportState();
+              
+              // Workflow complete - show badge after a delay to ensure all exports are done
+              setTimeout(() => {
+                chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                  if (tabs && tabs.length > 0 && tabs[0].id) {
+                    chrome.runtime.sendMessage({
+                      action: 'workflowComplete'
+                    });
+                  }
+                });
+              }, 1000);
+            }
+            
+            resolve(newState);
+          });
+        });
+      });
+    },
+
+    /**
+     * Get export state
+     */
+    getExportState: function() {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(['scraper_export_state'], (result) => {
+          resolve(result.scraper_export_state || null);
+        });
+      });
+    },
+
+    /**
+     * Clear export state
+     */
+    clearExportState: function() {
+      chrome.storage.local.remove(['scraper_export_state'], () => {
+        console.log('[ExportHandler] Cleared export state');
+      });
+    },
+
+    /**
+     * Clear data after export
+     */
+    _clearDataAfterExport: function() {
+      console.log('[ExportHandler] Clearing data after export...');
+      
+      // Clear in-memory data
+      if (window.PopupState) {
+        window.PopupState.clearDetailData();
+        window.PopupState.currentDetailData = null;
+      }
+      
+      // Clear storage data
+      chrome.storage.local.remove([
+        'scraper_detail_data',
+        window.PopupState?.STORAGE_KEY_DETAIL
+      ].filter(Boolean), () => {
+        console.log('[ExportHandler] Data cleared after export');
+      });
+      
+      // Clear results display
+      if (window.PopupDisplay) {
+        window.PopupDisplay.clearResults();
+      }
+    },
+
   };
 })();

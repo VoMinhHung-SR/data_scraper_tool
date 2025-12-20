@@ -6,13 +6,21 @@
   // ============================================
   window.DataScraperEcommerceHandlers = {
     /**
+     * Helper: Validate tab access
+     */
+    _validateTab: function(tab) {
+      if (!tab || !tab.id) {
+        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
+        return false;
+      }
+      return true;
+    },
+
+    /**
      * Handle scrape many products with scroll
      */
     handleScrapeManyProducts: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
 
       const maxProductsInput = document.getElementById('maxProducts');
       const productSelectorInput = document.getElementById('productSelector');
@@ -45,10 +53,7 @@
      * Handle scrape with pagination
      */
     handleScrapeWithPagination: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
 
       const maxProductsInput = document.getElementById('maxProducts');
       const productSelectorInput = document.getElementById('productSelector');
@@ -121,10 +126,7 @@
      * Handle scrape product detail
      */
     handleScrapeProductDetail: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
 
       const forceAPIInput = document.getElementById('forceAPIScraping');
       const forceAPI = forceAPIInput ? forceAPIInput.checked : false;
@@ -146,10 +148,7 @@
      * Handle scrape details from list
      */
     handleScrapeDetailsFromList: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
 
       const currentData = window.PopupState.getListData();
       if (!currentData || !Array.isArray(currentData) || currentData.length === 0) {
@@ -251,10 +250,7 @@
      * Handle scrape from API
      */
     handleScrapeFromAPI: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
 
       const maxProductsInput = document.getElementById('maxProducts');
       const apiUrlInput = document.getElementById('apiUrl');
@@ -280,10 +276,7 @@
      * Handle scrape Long Châu API (specific)
      */
     handleScrapeLongChauAPI: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
 
       const maxProductsInput = document.getElementById('maxProducts');
       const categoryInput = document.getElementById('apiCategory');
@@ -308,12 +301,70 @@
     /**
      * Handle scrape list AND details in one click
      * Scrapes product list first, then automatically scrapes details from the links
+     * Shows format selection modal before starting
      */
     handleScrapeListAndDetails: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
+      // Show format selection modal first (chỉ cho manual export)
+      const formatModal = document.getElementById('exportFormatModal');
+      if (formatModal) {
+        // Store tab reference for later use
+        formatModal.dataset.tabId = tab.id;
+        
+        // Setup format selection handler
+        const confirmBtn = document.getElementById('confirmExportFormat');
+        const cancelBtn = document.getElementById('cancelExportFormat');
+        let selectedFormat = 'csv'; // Default
+        
+        // Remove existing listeners to avoid duplicates
+        const newConfirmBtn = confirmBtn.cloneNode(true);
+        const newCancelBtn = cancelBtn.cloneNode(true);
+        confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+        
+        // Setup format selection
+        const formatOptions = document.querySelectorAll('#exportFormatModal .modal-option');
+        formatOptions.forEach(option => {
+          option.addEventListener('click', () => {
+            formatOptions.forEach(opt => opt.classList.remove('selected'));
+            option.classList.add('selected');
+            selectedFormat = option.dataset.format || 'csv';
+          });
+        });
+        
+        // Set default selection (CSV)
+        if (formatOptions.length > 0) {
+          formatOptions[0].classList.add('selected');
+        }
+        
+        // Confirm handler
+        newConfirmBtn.addEventListener('click', () => {
+          formatModal.style.display = 'none';
+          // Store selected format for later use
+          chrome.storage.local.set({ manualExportFormat: selectedFormat }, () => {
+            // Continue with scraping
+            this._proceedWithScrapeListAndDetails(tab);
+          });
+        });
+        
+        // Cancel handler
+        newCancelBtn.addEventListener('click', () => {
+          formatModal.style.display = 'none';
+        });
+        
+        // Show modal
+        formatModal.style.display = 'flex';
+        return; // Stop here, will continue after format selection
       }
+      
+      // Fallback: proceed without modal if modal not found
+      this._proceedWithScrapeListAndDetails(tab);
+    },
+    
+    /**
+     * Internal function to proceed with scrape list and details
+     */
+    _proceedWithScrapeListAndDetails: function(tab) {
+      if (!this._validateTab(tab)) return;
 
       // Fix: Clear any existing state first to prevent stuck listeners
       // This fixes the issue where scraping doesn't work after clear + routing
@@ -321,6 +372,9 @@
       const stateKeysToRemove = [
         'scrapeDetailsState',
         'paginationState',
+        // Export state (clear to avoid conflicts with previous session)
+        'scraper_export_state',
+        'currentExportBatch',
         window.DataScraperStateManager?.KEYS?.PAGINATION,
         window.DataScraperStateManager?.KEYS?.DETAIL_LIST,
         window.DataScraperStateManager?.KEYS?.API_CACHE
@@ -343,8 +397,8 @@
       const loadMoreSelectorInput = document.getElementById('loadMoreSelector');
       const nextPageSelectorInput = document.getElementById('nextPageSelector');
       
-      const maxProducts = parseInt(maxProductsInput?.value) || 100;
-      const skipProducts = parseInt(skipProductsInput?.value) || 0;
+      let maxProducts = parseInt(maxProductsInput?.value) || 100;
+      let skipProducts = parseInt(skipProductsInput?.value) || 0;
       const productSelector = productSelectorInput?.value.trim() || null;
       const containerSelector = containerSelectorInput?.value.trim() || null;
       const loadMoreSelector = loadMoreSelectorInput?.value.trim() || null;
@@ -361,9 +415,71 @@
         window.PopupDisplay.showMessage('Limit phải lớn hơn 0', 'error');
         return;
       }
-
-      // Show custom modal to choose method
-      const modal = document.getElementById('methodModal');
+      
+      // Check export state to continue from last exported index
+      window.DataScraperExportHandler?.getExportState().then((exportState) => {
+        if (exportState && exportState.lastExportedIndex !== undefined) {
+          const lastIndex = exportState.lastExportedIndex;
+          const totalLimit = exportState.totalLimit || (skipProducts + maxProducts);
+          
+          // Continue from last exported index
+          skipProducts = lastIndex;
+          
+          console.log('[ScrapeListAndDetails] Continuing from export state:', {
+            lastExportedIndex: lastIndex,
+            newSkip: skipProducts,
+            totalLimit: totalLimit
+          });
+          
+          // Check if we've reached total limit
+          if (skipProducts >= totalLimit) {
+            window.PopupDisplay.showMessage(
+              `✅ Đã scrape đủ ${totalLimit} sản phẩm. Hoàn tất!`,
+              'success'
+            );
+            // Clear export state
+            window.DataScraperExportHandler?.clearExportState();
+            return;
+          }
+          
+          // Update remaining limit (scrape in batches of maxProducts, but don't exceed totalLimit)
+          const remainingLimit = Math.min(maxProducts, totalLimit - skipProducts);
+          if (remainingLimit <= 0) {
+            window.PopupDisplay.showMessage(
+              `✅ Đã scrape đủ ${totalLimit} sản phẩm. Hoàn tất!`,
+              'success'
+            );
+            window.DataScraperExportHandler?.clearExportState();
+            return;
+          }
+          
+          maxProducts = remainingLimit; // Update limit for this batch
+          
+          window.PopupDisplay.showMessage(
+            `🔄 Tiếp tục scrape từ item ${skipProducts + 1} (còn lại ${remainingLimit} items)...`,
+            'loading'
+          );
+        } else {
+          // No export state, save total limit for first time
+          const totalLimit = skipProducts + maxProducts;
+          chrome.storage.local.set({
+            scraper_export_state: {
+              lastExportedIndex: 0,
+              totalLimit: totalLimit,
+              timestamp: Date.now()
+            }
+          });
+        }
+        
+        proceedWithScrapingInternal(skipProducts, maxProducts);
+      }).catch(() => {
+        // No export state, proceed normally
+        proceedWithScrapingInternal(skipProducts, maxProducts);
+      });
+      
+      function proceedWithScrapingInternal(actualSkip, actualLimit) {
+        // Show custom modal to choose method
+        const modal = document.getElementById('methodModal');
       if (!modal) {
         // Fallback to confirm
         const method = confirm(
@@ -460,237 +576,102 @@
       modal.addEventListener('click', overlayClickHandler);
 
       function proceedWithScraping(method) {
-        const estimatedTime = Math.ceil((maxProducts / 12) * 2 + (maxDetails * 3) / 60);
-        const confirmed = confirm(
-          `🚀 SCRAPE LIST + DETAIL (1 CLICK)\n\n` +
-          `📊 List: ${maxProducts} sản phẩm (${method === 'scroll' ? 'Scroll' : 'Pagination'})\n` +
-          `🔍 Detail: ${maxDetails} sản phẩm (bằng với list)\n` +
-          `⏱️ Ước tính: ~${estimatedTime} phút\n\n` +
-          `Quá trình tự động:\n` +
-          `1️⃣ Scrape danh sách sản phẩm\n` +
-          `2️⃣ Tự động scrape chi tiết từ các link đã lấy`
-        );
-        
-        if (!confirmed) return;
-
-        window.PopupDisplay.showMessage(
-          `🚀 Bước 1/2: Đang scrape ${maxProducts} sản phẩm (${method === 'scroll' ? 'Scroll' : 'Pagination'})...`, 
-          'loading'
-        );
-
-        const requestId = 'listAndDetails_' + Date.now();
-        let productList = [];
-
-      // Listen for pagination/scroll completion
-      const messageListener = (message, sender, sendResponse) => {
-        // Log ALL messages to debug
-        console.log('[ScrapeListAndDetails] Message received (all):', {
-          action: message?.action,
-          requestId: message?.requestId,
-          expectedRequestId: requestId,
-          hasData: !!message?.data,
-          dataLength: message?.data?.length || 0,
-          sender: sender?.tab?.id || 'unknown'
-        });
-        
-        // Log specific messages for debugging
-        if (message?.action === 'paginationComplete' || message?.action === 'scrollComplete') {
-          console.log('[ScrapeListAndDetails] Received scrollComplete/paginationComplete message:', {
-            action: message.action,
-            requestId: message.requestId,
-            expectedRequestId: requestId,
-            match: message.requestId === requestId,
-            dataLength: message.data?.length || 0,
-            sender: sender?.tab?.id || 'unknown'
-          });
+        // Kiểm tra module workflow có sẵn không
+        if (!window.DataScraperWorkflow) {
+          window.PopupDisplay.showMessage('Module workflow chưa được load. Vui lòng reload extension.', 'error');
+          return;
         }
-        
-        if ((message?.action === 'paginationComplete' || message?.action === 'scrollComplete') && 
-            message?.requestId === requestId) {
-          console.log('[ScrapeListAndDetails] Message matched! Processing...');
-          chrome.runtime.onMessage.removeListener(messageListener);
-          
-          productList = message.data || [];
-          console.log('[ScrapeListAndDetails] Product list received:', productList.length, 'items');
-          
-          // Extract all links first
-          const allProductLinks = productList
-            .map(p => p.link || p.url || p.href)
-            .filter(link => link && link.includes('.html'));
-          
-          console.log('[ScrapeListAndDetails] All product links:', allProductLinks.length);
-          
-          // Apply skip: skip first N items, then take maxDetails items
-          // Example: skip=100, limit=100 → scrape 200 items, then take items 101-200
-          const productLinks = allProductLinks.slice(skipProducts, skipProducts + maxDetails);
-          
-          console.log(`[ScrapeListAndDetails] Skip: ${skipProducts}, Limit: ${maxDetails}, Total scraped: ${productList.length}, Total links: ${allProductLinks.length}, Links to scrape: ${productLinks.length} (range: ${skipProducts + 1}-${skipProducts + productLinks.length})`);
-          
-          if (productLinks.length === 0) {
-            window.PopupDisplay.showMessage(
-              `Không có link nào sau khi skip ${skipProducts} items. Tổng số links: ${allProductLinks.length}`, 
-              'error'
-            );
-            return;
-          }
-          
-          console.log('[ScrapeListAndDetails] Starting detail scraping for', productLinks.length, 'products');
 
-          // Step 2: Scrape details
-          window.PopupDisplay.showMessage(
-            `✅ Đã scrape ${productList.length} sản phẩm trong list\n` +
-            `🔍 Bước 2/2: Đang scrape chi tiết ${productLinks.length} sản phẩm (giới hạn: ${maxDetails})...`, 
-            'loading'
-          );
+        const forceAPIInput = document.getElementById('forceAPIScraping');
+        const forceAPI = forceAPIInput ? forceAPIInput.checked : false;
 
-          // Listen for details completion (separate listener)
-          const detailsListener = (detailsMessage, sender, detailsSendResponse) => {
-            if (detailsMessage.action === 'detailsScrapingComplete') {
-              chrome.runtime.onMessage.removeListener(detailsListener);
-              chrome.runtime.onMessage.removeListener(messageListener);
-              
-              const details = detailsMessage.data || [];
-              window.PopupState.setDetailData(details);
-              window.PopupDisplay.displayResults(details, { maxProducts: maxDetails });
-              
-              // Hide processing status
-              const processingStatus = document.getElementById('processingStatus');
-              if (processingStatus) {
-                processingStatus.style.display = 'none';
-              }
-              
-              // Chỉ hiện 1 line message ngắn gọn
+        // Hiển thị processing status
+        const processingStatus = document.getElementById('processingStatus');
+        const processingText = document.getElementById('processingText');
+        if (processingStatus) {
+          processingStatus.style.display = 'block';
+        }
+
+        // Sử dụng module workflow mới
+        window.DataScraperWorkflow.scrapeListAndDetails({
+          skip: actualSkip,
+          limit: actualLimit,
+          method: method,
+          productSelector: productSelector,
+          containerSelector: containerSelector,
+          loadMoreSelector: loadMoreSelector,
+          nextPageSelector: nextPageSelector,
+          forceAPI: forceAPI,
+          onProgress: (progressData) => {
+            // Update progress
+            if (processingText) {
+              processingText.textContent = progressData.message || 'Đang xử lý...';
+            }
+            
+            if (progressData.step === 'loading_list') {
               window.PopupDisplay.showMessage(
-                `✅ Đã scrape thành công ${details.length}/${maxDetails} sản phẩm`, 
-                'success'
+                `🚀 Bước 1/2: ${progressData.message}`,
+                'loading'
               );
-              detailsSendResponse({ success: true });
-            }
-            return true;
-          };
-
-          chrome.runtime.onMessage.addListener(detailsListener);
-
-          const forceAPIInput = document.getElementById('forceAPIScraping');
-          const forceAPI = forceAPIInput ? forceAPIInput.checked : false;
-
-          console.log('[ScrapeListAndDetails] Sending detail scrape request with', productLinks.length, 'links');
-          chrome.tabs.sendMessage(tab.id, {
-            action: 'scrape',
-            type: 'productDetailsFromList',
-            options: {
-              productLinks: productLinks,
-              delay: 2000,
-              maxDetails: maxDetails,
-              forceAPI: forceAPI
-            }
-          }, (response) => {
-            if (chrome.runtime.lastError) {
-              console.error('[ScrapeListAndDetails] Error sending detail scrape request:', chrome.runtime.lastError);
-              chrome.runtime.onMessage.removeListener(detailsListener);
-              window.PopupDisplay.showMessage('Lỗi: ' + chrome.runtime.lastError.message, 'error');
-              return;
-            }
-            console.log('[ScrapeListAndDetails] Detail scrape request sent, response:', response);
-            // Response chỉ là empty array, chi tiết sẽ đến qua detailsScrapingComplete
-            if (response?.success !== false) {
-              // Đã bắt đầu scrape, chờ detailsScrapingComplete
+            } else if (progressData.step === 'scraping_details') {
               window.PopupDisplay.showMessage(
-                `🚀 Đã bắt đầu scrape chi tiết...\n` +
-                `Đang navigate giữa các trang sản phẩm...`, 
+                `🔍 Bước 2/2: ${progressData.message}`,
                 'loading'
               );
             }
-          });
-          
-          sendResponse({ success: true });
-        }
-      };
+          },
+          onComplete: (result) => {
+            // Hide processing status
+            if (processingStatus) {
+              processingStatus.style.display = 'none';
+            }
 
-      // Add listener BEFORE starting scrape to ensure it's ready
-      chrome.runtime.onMessage.addListener(messageListener);
-      console.log('[ScrapeListAndDetails] Message listener added, waiting for scrollComplete/paginationComplete with requestId:', requestId);
+            // Set data và display results
+            window.PopupState.setDetailData(result.details);
+            window.PopupDisplay.displayResults(result.details, { 
+              maxProducts: result.expectedDetailCount 
+            });
 
-      // Start list scraping
-      // Need to scrape MORE to account for skip: skip + limit
-      // Example: skip=100, limit=100 → scrape 200 items, then slice to get items 101-200
-      const totalToScrape = skipProducts + maxProducts;
-      console.log(`[ScrapeListAndDetails] Scraping list: skip=${skipProducts}, limit=${maxProducts}, total=${totalToScrape}`);
-      
-      const listOptions = {
-        maxProducts: totalToScrape, // Scrape total = skip + limit
-        productSelector,
-        containerSelector,
-        requestId: requestId,
-        [method === 'scroll' ? 'loadMoreSelector' : 'nextPageSelector']: 
-          method === 'scroll' ? loadMoreSelector : nextPageSelector,
-        useLoadMore: method === 'scroll',
-        scrollDelay: 1000,
-        maxScrolls: 100,
-        pageDelay: 2000,
-        maxPages: Math.ceil(totalToScrape / 12) + 2
-      };
-
-      chrome.tabs.sendMessage(tab.id, {
-        action: 'scrape',
-        type: method === 'scroll' ? 'productsWithScroll' : 'productsWithPagination',
-        options: listOptions
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          chrome.runtime.onMessage.removeListener(messageListener);
-          const errorMsg = chrome.runtime.lastError.message;
-          if (errorMsg.includes('Receiving end does not exist')) {
-            window.PopupDisplay.showMessage('Content script chưa được load. Vui lòng reload trang và thử lại.', 'error');
-          } else {
-            window.PopupDisplay.showMessage('Lỗi: ' + errorMsg, 'error');
-          }
-        } else if (response?.success && response.data) {
-          // If list scraping completes immediately (single page, no pagination needed)
-          productList = response.data;
-          const allProductLinks = productList
-            .map(p => p.link || p.url || p.href)
-            .filter(link => link && link.includes('.html'));
-          
-          // Apply skip: skip first N items, then take maxDetails items
-          const productLinks = allProductLinks.slice(skipProducts, skipProducts + maxDetails);
-
-          if (productLinks.length > 0) {
-            chrome.runtime.onMessage.removeListener(messageListener);
-            // Trigger detail scraping
-            window.PopupDisplay.showMessage(
-              `✅ Đã scrape ${productList.length} sản phẩm trong list\n` +
-              `🔍 Bước 2/2: Đang scrape chi tiết ${productLinks.length} sản phẩm...`, 
-              'loading'
-            );
-
-            chrome.tabs.sendMessage(tab.id, {
-              action: 'scrape',
-              type: 'productDetailsFromList',
-              options: {
-                productLinks: productLinks,
-                delay: 2000,
-                maxDetails: maxDetails
-              }
-            }, (detailResponse) => {
-              if (chrome.runtime.lastError) {
-                window.PopupDisplay.showMessage('Lỗi: ' + chrome.runtime.lastError.message, 'error');
-                return;
-              }
-              if (detailResponse?.success) {
-                // Kết quả chi tiết sẽ được gửi qua detailsScrapingComplete
-                window.PopupDisplay.showMessage(
-                  `🔍 Đang scrape chi tiết... (trình duyệt sẽ tự mở từng sản phẩm)`,
-                  'loading'
-                );
+            // Check if this is manual export (1click) - use selected format
+            // Auto-export is handled in content.js, not here
+            chrome.storage.local.get(['manualExportFormat'], (storageResult) => {
+              const manualFormat = storageResult.manualExportFormat;
+              
+              // Only export manually if format was selected (from 1click button)
+              if (manualFormat && result.details && result.details.length > 0) {
+                console.log('[EcommerceHandlers] Manual export (1click), using format:', manualFormat);
+                
+                // Clear manual format after use
+                chrome.storage.local.remove(['manualExportFormat'], () => {
+                  // Export with selected format (no modal, format already chosen)
+                  window.DataScraperExportHandler.exportData(manualFormat, result.details);
+                });
               } else {
-                window.PopupDisplay.showMessage('Lỗi: ' + (detailResponse?.error || 'Unknown error'), 'error');
+                console.log('[EcommerceHandlers] No manual export format found, skipping export (auto-export handled separately)');
               }
             });
-          } else {
-            window.PopupDisplay.showMessage('Không tìm thấy link sản phẩm trong danh sách!', 'error');
+
+            // Show success message
+            const autoExportMsg = autoExportCheckbox?.checked ? ' (đang tự động export...)' : '';
+            window.PopupDisplay.showMessage(
+              `✅ Đã scrape thành công ${result.detailCount}/${result.expectedDetailCount} sản phẩm${autoExportMsg}\n` +
+              `📊 Tổng số sản phẩm trong list: ${result.listCount}`,
+              'success'
+            );
+          },
+          onError: (error) => {
+            // Hide processing status
+            if (processingStatus) {
+              processingStatus.style.display = 'none';
+            }
+
+            window.PopupDisplay.showMessage(
+              `❌ Lỗi: ${error.message || 'Unknown error'}`,
+              'error'
+            );
           }
-        }
-      });
+        });
+      }
       }
     }
   };

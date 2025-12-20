@@ -27,6 +27,7 @@
         "core/base-scraper.js",
         "core/pagination-handler.js",
         "core/product-scraper.js",
+        "core/scrape-workflow.js",
         "handlers/highlight-manager.js",
         "handlers/message-handler.js",
         "content.js"

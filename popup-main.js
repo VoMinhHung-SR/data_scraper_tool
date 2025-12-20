@@ -17,6 +17,14 @@
       
       // Listen for details scraping completion
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        // Auto-export batch được xử lý trong background script
+        // Không cần xử lý ở đây nữa để tránh hiện modal
+        if (message.action === 'autoExportBatch') {
+          // Just acknowledge - background script will handle it
+          sendResponse({ success: true });
+          return true;
+        }
+        
         if (message.action === 'detailsScrapingComplete') {
           console.log('[PopupMain] Received detailsScrapingComplete:', {
             dataLength: message.data?.length || 0,
@@ -59,15 +67,25 @@
               maxProducts: message.maxProducts || details.length 
             });
             
-            // Check auto-export setting
-            const autoExportCheckbox = document.getElementById('autoExportCSV');
-            if (autoExportCheckbox && autoExportCheckbox.checked) {
-              console.log('[PopupMain] Auto-export enabled, starting export...');
-              // Delay a bit to ensure UI is ready
-              setTimeout(() => {
-                window.DataScraperExportHandler.exportData('csv', details);
-              }, 500);
-            }
+            // Check if manual export format was selected (from 1click button)
+            // Auto-export is handled in content.js/background.js, not here
+            chrome.storage.local.get(['manualExportFormat'], (result) => {
+              const manualFormat = result.manualExportFormat;
+              
+              // Only export manually if format was selected (from 1click button)
+              // Don't export here if auto-export is enabled (already handled in background)
+              if (manualFormat && details.length > 0) {
+                console.log('[PopupMain] Manual export (1click) - using format:', manualFormat);
+                
+                // Clear manual format after use
+                chrome.storage.local.remove(['manualExportFormat'], () => {
+                  // Export with selected format (no modal, format already chosen)
+                  window.DataScraperExportHandler.exportData(manualFormat, details);
+                });
+              } else {
+                console.log('[PopupMain] No manual export format found, skipping export (auto-export handled separately)');
+              }
+            });
           }
           
           // Hide processing status
@@ -103,29 +121,82 @@
           listLength: savedListData?.length || 0
         });
         
-        if (savedDetailData && Array.isArray(savedDetailData) && savedDetailData.length > 0) {
-          console.log('[PopupMain] Restoring detail data:', savedDetailData.length, 'items');
-          // Restore detail data and show modal
-          window.PopupDisplay.displayResults(savedDetailData, { 
-            maxProducts: savedDetailData.length 
-          });
-          window.PopupDisplay.showMessage(
-            `✅ Đã khôi phục ${savedDetailData.length} chi tiết sản phẩm từ lần scrape trước`, 
-            'success'
-          );
-        } else if (savedListData && Array.isArray(savedListData) && savedListData.length > 0) {
-          console.log('[PopupMain] Restoring list data:', savedListData.length, 'items');
-          // Restore list data and show modal
-          window.PopupDisplay.displayResults(savedListData, { 
-            maxProducts: savedListData.length 
-          });
-          window.PopupDisplay.showMessage(
-            `✅ Đã khôi phục ${savedListData.length} sản phẩm trong danh sách từ lần scrape trước`, 
-            'success'
-          );
-        } else {
-          console.log('[PopupMain] No saved data to restore');
-        }
+        // Check export state - if auto-export is in progress or completed, only show success message
+        chrome.storage.local.get(['scraper_export_state', 'autoExportEnabled'], (exportResult) => {
+          const exportState = exportResult.scraper_export_state || {};
+          const autoExportEnabled = exportResult.autoExportEnabled;
+          const hasExportState = exportState.lastExportedIndex !== undefined;
+          const isAutoExportEnabled = autoExportEnabled === true || autoExportEnabled === undefined;
+          
+          // If auto-export is enabled and has export state, only show success message (no export modal)
+          if (hasExportState && isAutoExportEnabled) {
+            const lastExported = exportState.lastExportedIndex || 0;
+            const totalLimit = exportState.totalLimit || 0;
+            const isComplete = totalLimit > 0 && lastExported >= totalLimit;
+            
+            if (savedDetailData && Array.isArray(savedDetailData) && savedDetailData.length > 0) {
+              console.log('[PopupMain] Auto-export in progress, showing success message only');
+              window.PopupDisplay.displayResults(savedDetailData, { 
+                maxProducts: savedDetailData.length 
+              });
+              
+              if (isComplete) {
+                window.PopupDisplay.showMessage(
+                  `✅ Đã scrape và export thành công ${totalLimit} sản phẩm. Hoàn tất!`, 
+                  'success'
+                );
+                // Show badge if workflow complete
+                chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                  if (tabs && tabs.length > 0 && tabs[0].id) {
+                    chrome.runtime.sendMessage({
+                      action: 'workflowComplete'
+                    });
+                  }
+                });
+              } else {
+                window.PopupDisplay.showMessage(
+                  `✅ Đã scrape ${savedDetailData.length} sản phẩm. Đã export ${lastExported}/${totalLimit} items. Đang tiếp tục...`, 
+                  'success'
+                );
+              }
+            } else if (savedListData && Array.isArray(savedListData) && savedListData.length > 0) {
+              console.log('[PopupMain] Auto-export in progress, showing success message only');
+              window.PopupDisplay.displayResults(savedListData, { 
+                maxProducts: savedListData.length 
+              });
+              window.PopupDisplay.showMessage(
+                `✅ Đã scrape ${savedListData.length} sản phẩm. Đã export ${lastExported}/${totalLimit} items. Đang tiếp tục...`, 
+                'success'
+              );
+            }
+            return; // Don't trigger export modal
+          }
+          
+          // Normal restore (no auto-export or export state)
+          if (savedDetailData && Array.isArray(savedDetailData) && savedDetailData.length > 0) {
+            console.log('[PopupMain] Restoring detail data:', savedDetailData.length, 'items');
+            // Restore detail data and show modal
+            window.PopupDisplay.displayResults(savedDetailData, { 
+              maxProducts: savedDetailData.length 
+            });
+            window.PopupDisplay.showMessage(
+              `✅ Đã khôi phục ${savedDetailData.length} chi tiết sản phẩm từ lần scrape trước`, 
+              'success'
+            );
+          } else if (savedListData && Array.isArray(savedListData) && savedListData.length > 0) {
+            console.log('[PopupMain] Restoring list data:', savedListData.length, 'items');
+            // Restore list data and show modal
+            window.PopupDisplay.displayResults(savedListData, { 
+              maxProducts: savedListData.length 
+            });
+            window.PopupDisplay.showMessage(
+              `✅ Đã khôi phục ${savedListData.length} sản phẩm trong danh sách từ lần scrape trước`, 
+              'success'
+            );
+          } else {
+            console.log('[PopupMain] No saved data to restore');
+          }
+        });
       }, 500); // Increase timeout to ensure DOM is ready
     } catch (error) {
       console.error('Init error:', error);
@@ -224,7 +295,8 @@
     if (exportJSONBtn) {
       exportJSONBtn.addEventListener('click', () => {
         const data = window.PopupState.getData();
-        window.DataScraperExportHandler.exportData('json', data);
+        // Show format selection modal
+        window.DataScraperExportHandler.exportData(null, data);
       });
     }
 
@@ -232,7 +304,8 @@
     if (exportCSVBtn) {
       exportCSVBtn.addEventListener('click', () => {
         const data = window.PopupState.getData();
-        window.DataScraperExportHandler.exportData('csv', data);
+        // Show format selection modal
+        window.DataScraperExportHandler.exportData(null, data);
       });
     }
 
@@ -263,6 +336,129 @@
         if (e.target === resultsModal) {
           resultsModal.style.display = 'none';
           resultsModal.classList.remove('active');
+        }
+      });
+    }
+
+    // Auto-check and disable export checkbox when maxProducts > 100
+    const maxProductsInput = document.getElementById('maxProducts');
+    const autoExportCheckbox = document.getElementById('autoExportCSV');
+    if (maxProductsInput && autoExportCheckbox) {
+      const updateCheckboxState = () => {
+        const value = parseInt(maxProductsInput.value) || 0;
+        if (value > 100) {
+          autoExportCheckbox.checked = true;
+          autoExportCheckbox.disabled = true;
+          // Save auto-export state to storage
+          chrome.storage.local.set({ autoExportEnabled: true });
+          // Update label to show it's auto-enabled
+          const label = autoExportCheckbox.closest('label');
+          if (label) {
+            const span = label.querySelector('span');
+            if (span) {
+              span.style.color = '#666';
+              span.style.fontStyle = 'italic';
+            }
+          }
+        } else {
+          autoExportCheckbox.disabled = false;
+          // Save auto-export state to storage
+          chrome.storage.local.set({ autoExportEnabled: autoExportCheckbox.checked });
+          // Reset label style
+          const label = autoExportCheckbox.closest('label');
+          if (label) {
+            const span = label.querySelector('span');
+            if (span) {
+              span.style.color = '';
+              span.style.fontStyle = '';
+            }
+          }
+        }
+      };
+      
+      // Listen to checkbox changes
+      autoExportCheckbox.addEventListener('change', () => {
+        chrome.storage.local.set({ autoExportEnabled: autoExportCheckbox.checked });
+      });
+      
+      // Check on load
+      updateCheckboxState();
+      
+      // Check on change
+      maxProductsInput.addEventListener('input', updateCheckboxState);
+    }
+
+    // Export format modal handlers
+    setupExportFormatModal();
+    
+    // Export complete modal handlers
+    setupExportCompleteModal();
+  }
+
+  /**
+   * Setup export format selection modal
+   */
+  function setupExportFormatModal() {
+    const formatModal = document.getElementById('exportFormatModal');
+    const cancelBtn = document.getElementById('cancelExportFormat');
+    const confirmBtn = document.getElementById('confirmExportFormat');
+    let selectedFormat = 'csv'; // Default
+
+    // Format option selection
+    if (formatModal) {
+      const options = formatModal.querySelectorAll('.modal-option[data-format]');
+      options.forEach(option => {
+        option.addEventListener('click', () => {
+          options.forEach(opt => opt.classList.remove('selected'));
+          option.classList.add('selected');
+          selectedFormat = option.dataset.format;
+        });
+      });
+
+      // Set default selection
+      const defaultOption = formatModal.querySelector('.modal-option[data-format="csv"]');
+      if (defaultOption) {
+        defaultOption.classList.add('selected');
+      }
+    }
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        if (formatModal) formatModal.style.display = 'none';
+        window.DataScraperExportHandler._resetExportState();
+      });
+    }
+
+    if (confirmBtn) {
+      confirmBtn.addEventListener('click', () => {
+        if (formatModal) formatModal.style.display = 'none';
+        // Use pending data if available (from auto-export), otherwise get from state
+        const data = window.DataScraperExportHandler._pendingExportData || window.PopupState.getData();
+        if (data && data.length > 0) {
+          window.DataScraperExportHandler._pendingExportData = null; // Clear
+          window.DataScraperExportHandler.exportData(selectedFormat, data);
+        }
+      });
+    }
+  }
+
+  /**
+   * Setup export complete modal
+   */
+  function setupExportCompleteModal() {
+    const completeModal = document.getElementById('exportCompleteModal');
+    const closeBtn = document.getElementById('closeExportComplete');
+
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        if (completeModal) completeModal.style.display = 'none';
+      });
+    }
+
+    if (completeModal) {
+      completeModal.addEventListener('click', (e) => {
+        if (e.target === completeModal) {
+          completeModal.style.display = 'none';
         }
       });
     }

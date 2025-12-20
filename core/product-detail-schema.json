@@ -12,7 +12,23 @@
     "priceValue": "number",
     "packageSize": "string",
     "prices": "array",
-    "priceObj": "object|null"
+    "priceObj": "object|null",
+    "packageOptions": [
+      {
+        "unit": "string",
+        "unitDisplay": "string",
+        "price": "string",
+        "priceDisplay": "string",
+        "priceValue": "number",
+        "specification": "string",
+        "isDefault": "boolean",
+        "isAvailable": "boolean",
+        "conversion": {
+          "baseUnit": "string",
+          "quantity": "number"
+        }
+      }
+    ]
   },
   "rating": {
     "rating": "string",

@@ -28,7 +28,8 @@
         priceValue: data.pricing?.priceValue !== undefined ? data.pricing.priceValue : (data.priceValue || 0),
         packageSize: data.pricing?.packageSize || data.packageSize || '',
         prices: Array.isArray(data.pricing?.prices) ? data.pricing.prices : (Array.isArray(data.prices) ? data.prices : []),
-        priceObj: data.pricing?.priceObj || data.priceObj || null
+        priceObj: data.pricing?.priceObj || data.priceObj || null,
+        packageOptions: Array.isArray(data.pricing?.packageOptions) ? data.pricing.packageOptions : (Array.isArray(data.packageOptions) ? data.packageOptions : [])
       };
 
       const rating = {

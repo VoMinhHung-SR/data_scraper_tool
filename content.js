@@ -1199,9 +1199,64 @@
             state.details.push(detail);
               
               // Update progress after scrape
-              const newPercent = Math.round((state.details.length / total) * 100);
+              // Use total links, not effectiveLimit, to show accurate progress
+              const newPercent = Math.round((state.details.length / state.links.length) * 100);
               if (window.DataScraperProgressIndicator) {
                 window.DataScraperProgressIndicator.update(newPercent);
+              }
+              
+              // Log progress for debugging
+              if (state.details.length % 50 === 0 || state.details.length === state.links.length) {
+                console.log(`[AutoScrape] Progress: ${state.details.length}/${state.links.length} details scraped (${state.currentIndex}/${state.links.length} links processed)`);
+              }
+              
+              // Auto-export mỗi khi đạt 100 items (hoặc bội số của 100)
+              const currentCount = state.details.length;
+              if (currentCount > 0 && currentCount % 100 === 0) {
+                // Delay 4s trước khi export
+                setTimeout(() => {
+                  // Check auto-export setting và trigger export
+                  chrome.storage.local.get(['scraper_export_state', 'autoExportEnabled'], (exportResult) => {
+                    const exportState = exportResult.scraper_export_state || {};
+                    const autoExportEnabled = exportResult.autoExportEnabled;
+                    
+                    // Auto-export nếu:
+                    // 1. Có totalLimit (đang trong workflow) VÀ
+                    // 2. (autoExportEnabled === true HOẶC autoExportEnabled === undefined - default enable)
+                    const shouldAutoExport = exportState.totalLimit && 
+                      (autoExportEnabled === true || autoExportEnabled === undefined);
+                    
+                    if (shouldAutoExport) {
+                      const batchStart = currentCount - 100 + 1;
+                      const batchEnd = currentCount;
+                      const batchData = state.details.slice(currentCount - 100, currentCount);
+                      
+                      console.log(`[AutoScrape] ✅ Đã scrape đủ ${currentCount} items, trigger export batch (${batchStart}-${batchEnd})...`);
+                      
+                      // Send message to background script to trigger export (không cần popup)
+                      chrome.runtime.sendMessage({
+                        action: 'autoExportBatch',
+                        data: batchData,
+                        batchNumber: Math.floor(currentCount / 100),
+                        startIndex: batchStart,
+                        endIndex: batchEnd,
+                        totalCount: currentCount
+                      }, (response) => {
+                        if (chrome.runtime.lastError) {
+                          console.error('[AutoScrape] ❌ Error sending autoExportBatch message:', chrome.runtime.lastError);
+                        } else {
+                          console.log(`[AutoScrape] ✅ Auto-export batch ${Math.floor(currentCount / 100)} triggered`);
+                        }
+                      });
+                    } else {
+                      console.log('[AutoScrape] ⏭️ Auto-export skipped:', {
+                        hasTotalLimit: !!exportState.totalLimit,
+                        autoExportEnabled: autoExportEnabled,
+                        shouldAutoExport: shouldAutoExport
+                      });
+                    }
+                  });
+                }, 4000); // Delay 4s trước khi export
               }
             } else {
             }
@@ -1211,7 +1266,27 @@
           state.currentIndex++;
           
           // Check if we've reached maxDetails limit or end of links
-          if (state.currentIndex >= state.links.length || state.details.length >= (state.maxDetails || state.links.length)) {
+          // Use Math.min to ensure we don't exceed available links
+          const effectiveLimit = Math.min(
+            state.maxDetails || state.links.length,
+            state.links.length
+          );
+          
+          // Check completion: 
+          // Ưu tiên xử lý hết tất cả links trước, không dừng sớm vì limit
+          // Vì có thể có items bị skip do lỗi, nên cần thử scrape tất cả links
+          const hasProcessedAllLinks = state.currentIndex >= state.links.length;
+          
+          // Chỉ check limit nếu đã xử lý hết links HOẶC đã scrape đủ limit
+          // Nhưng ưu tiên xử lý hết links để không miss items
+          if (hasProcessedAllLinks) {
+            console.log(`[AutoScrape] ✅ Completed: Đã xử lý hết tất cả links`, {
+              detailsScraped: state.details.length,
+              linksProcessed: state.currentIndex,
+              totalLinks: state.links.length,
+              effectiveLimit: effectiveLimit,
+              missingItems: state.links.length - state.details.length
+            });
             chrome.storage.local.remove(['scrapeDetailsState']);
             
             // Show completion indicator
@@ -1262,9 +1337,8 @@
           
           if (nextLink) {
             chrome.storage.local.set({ scrapeDetailsState: state }, () => {
-              setTimeout(() => {
-                window.location.href = nextLink;
-              }, 1500);
+              // Navigate to next product - page load sẽ được handle bởi window.onload listener
+              window.location.href = nextLink;
             });
           } else {
             chrome.storage.local.remove(['scrapeDetailsState']);
@@ -1293,13 +1367,28 @@
           }
         };
         
-        if (document.readyState === 'complete') {
-          setTimeout(scrapeAndContinue, 2500);
-        } else {
-          window.addEventListener('load', () => {
-            setTimeout(scrapeAndContinue, 2500);
-          });
-        }
+        // Helper function để chờ page load hoàn tất
+        const waitForPageLoad = (callback) => {
+          // Nếu page đã load xong, chờ thêm một chút để đảm bảo DOM đã render
+          if (document.readyState === 'complete') {
+            // Chờ thêm một chút để đảm bảo dynamic content đã load
+            const checkInterval = setInterval(() => {
+              // Check nếu có các element quan trọng đã xuất hiện (tùy chọn)
+              // Hoặc đơn giản chỉ cần chờ một khoảng thời gian ngắn sau khi readyState === 'complete'
+              clearInterval(checkInterval);
+              callback();
+            }, 500); // Chờ 500ms sau khi readyState === 'complete'
+          } else {
+            // Chờ window.onload event
+            window.addEventListener('load', () => {
+              // Sau khi load, chờ thêm một chút để đảm bảo dynamic content đã render
+              setTimeout(callback, 500);
+            }, { once: true });
+          }
+        };
+        
+        // Chờ page load hoàn tất trước khi scrape
+        waitForPageLoad(scrapeAndContinue);
       }
     }
   });
@@ -1464,14 +1553,25 @@
         }
       };
 
-      // Wait for page ready
-      if (document.readyState === 'complete') {
-        setTimeout(continueScraping, 1000);
-      } else {
-        window.addEventListener('load', () => {
-          setTimeout(continueScraping, 1000);
-        });
-      }
+      // Helper function để chờ page load hoàn tất
+      const waitForPageLoad = (callback) => {
+        if (document.readyState === 'complete') {
+          // Chờ thêm một chút để đảm bảo dynamic content đã load
+          const checkInterval = setInterval(() => {
+            clearInterval(checkInterval);
+            callback();
+          }, 500); // Chờ 500ms sau khi readyState === 'complete'
+        } else {
+          // Chờ window.onload event
+          window.addEventListener('load', () => {
+            // Sau khi load, chờ thêm một chút để đảm bảo dynamic content đã render
+            setTimeout(callback, 500);
+          }, { once: true });
+        }
+      };
+      
+      // Chờ page load hoàn tất trước khi scrape
+      waitForPageLoad(continueScraping);
     }
     
     // Save current URL for state management

@@ -80,6 +80,9 @@
         'paginationState',
         // API cache
         'lastProductDetailAPI',
+        // Export state (CRITICAL - must be cleared to avoid conflicts with next session)
+        'scraper_export_state',
+        'currentExportBatch',
         // DataScraperStateManager keys
         window.DataScraperStateManager?.KEYS?.PAGINATION,
         window.DataScraperStateManager?.KEYS?.DETAIL_LIST,

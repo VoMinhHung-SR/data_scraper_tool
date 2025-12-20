@@ -68,7 +68,7 @@
         chrome.downloads.download({
           url: dataUrl,
           filename: filename,
-          saveAs: true
+          saveAs: false // Auto-save to default downloads folder
         }, (downloadId) => {
           if (chrome.runtime.lastError) {
             const errorMsg = chrome.runtime.lastError.message;
@@ -104,6 +104,229 @@
       }
     }
   };
+
+  // ============================================
+  // 📤 AUTO EXPORT HANDLER (Background)
+  // ============================================
+  const AutoExportHandler = {
+    // Helper: Normalize text to slug format
+    _normalizeToSlug: (text) => {
+      return text.toLowerCase()
+        .replace(/[,\s]+/g, '-')
+        .replace(/[^a-z0-9\-]/g, '')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    },
+
+    // Extract category slug from data
+    // Converts "Thuốc/Thuốc giải độc, khử độc và hỗ trợ cai nghiện" 
+    // to "thuoc-thuocgiaidoc-khudoc-hotrocainghien"
+    extractCategorySlug: (data) => {
+      if (!data?.length) return 'products';
+      
+      const firstItem = data[0];
+      if (!firstItem) return 'products';
+      
+      // Priority 1: Use categorySlug if available
+      if (firstItem.categorySlug) {
+        return firstItem.categorySlug
+          .split(/[\/>]/)
+          .map(c => AutoExportHandler._normalizeToSlug(c.trim()))
+          .filter(c => c)
+          .join('-');
+      }
+      
+      // Priority 2: Extract from categoryPath
+      if (firstItem.categoryPath) {
+        return firstItem.categoryPath
+          .split(/[\/>]/)
+          .map(c => c.trim())
+          .filter(c => c && !c.match(/trang\s+chủ|homepage/i))
+          .map(c => AutoExportHandler._normalizeToSlug(c))
+          .join('-');
+      }
+      
+      // Priority 3: Extract from category array
+      if (Array.isArray(firstItem.category) && firstItem.category.length > 0) {
+        return firstItem.category
+          .map(c => AutoExportHandler._normalizeToSlug((c.slug || c.name || c).toString()))
+          .filter(c => c)
+          .join('-');
+      }
+      
+      // Priority 4: Extract from URL
+      if (firstItem.link) {
+        const match = firstItem.link.match(/\/([^\/]+)\/[^\/]+\.html/);
+        if (match) {
+          return AutoExportHandler._normalizeToSlug(match[1]);
+        }
+      }
+      
+      return 'products';
+    },
+
+    // Convert data to CSV
+    convertToCSV: (data) => {
+      if (!data || data.length === 0) return '';
+      
+      // Collect all headers from data
+      const headers = new Set();
+      data.forEach(item => {
+        if (item && typeof item === 'object') {
+          const flatten = (obj, prefix = '') => {
+            Object.keys(obj).forEach(key => {
+              const value = obj[key];
+              const newKey = prefix ? `${prefix}.${key}` : key;
+              if (value && typeof value === 'object' && !Array.isArray(value)) {
+                flatten(value, newKey);
+              } else {
+                headers.add(newKey);
+              }
+            });
+          };
+          flatten(item);
+        }
+      });
+      
+      const headerArray = Array.from(headers);
+      const rows = [headerArray.map(h => `"${String(h).replace(/"/g, '""')}"`).join(',')];
+      
+      data.forEach(item => {
+        if (!item || typeof item !== 'object') {
+          rows.push(headerArray.map(() => '""').join(','));
+          return;
+        }
+        
+        const flatten = (obj, prefix = '') => {
+          const result = {};
+          Object.keys(obj).forEach(key => {
+            const value = obj[key];
+            const newKey = prefix ? `${prefix}.${key}` : key;
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+              Object.assign(result, flatten(value, newKey));
+            } else {
+              result[newKey] = value;
+            }
+          });
+          return result;
+        };
+        
+        const flattened = flatten(item);
+        const row = headerArray.map(h => {
+          const value = flattened[h];
+          if (value === null || value === undefined) return '""';
+          const str = String(value).replace(/"/g, '""');
+          return `"${str}"`;
+        });
+        rows.push(row.join(','));
+      });
+      
+      return '\ufeff' + rows.join('\n'); // BOM for Excel
+    },
+
+    // Handle auto export in background
+    handleAutoExport: (data, batchInfo) => {
+      try {
+        console.log('[AutoExportHandler] Starting auto-export:', {
+          dataLength: data.length,
+          batchInfo
+        });
+        
+        // Extract category slug
+        const categorySlug = AutoExportHandler.extractCategorySlug(data);
+        
+        // Generate filename
+        const filename = `scraped-data-${categorySlug}-${batchInfo.startIndex}-${batchInfo.endIndex}.csv`;
+        
+        // Convert to CSV
+        const csvContent = AutoExportHandler.convertToCSV(data);
+        
+        if (!csvContent || csvContent.length === 0) {
+          console.error('[AutoExportHandler] Empty CSV content');
+          return;
+        }
+        
+        // Check file size (max 50MB for data URL)
+        const contentSize = Utils.getContentSize(csvContent);
+        const sizeInMB = contentSize / (1024 * 1024);
+        
+        if (sizeInMB > 50) {
+          console.error(`[AutoExportHandler] File too large: ${sizeInMB.toFixed(2)}MB`);
+          return;
+        }
+        
+        // Create data URL (service worker không hỗ trợ blob URL)
+        const dataUrl = Utils.encodeToDataURL(csvContent, 'text/csv');
+        
+        console.log(`[AutoExportHandler] Created data URL, size: ${sizeInMB.toFixed(2)}MB`);
+        
+        // Download file với delay 1s
+        setTimeout(() => {
+          chrome.downloads.download({
+            url: dataUrl,
+            filename: filename,
+            saveAs: false // Auto-save to default downloads folder
+          }, (downloadId) => {
+            if (chrome.runtime.lastError) {
+              console.error('[AutoExportHandler] Download error:', chrome.runtime.lastError);
+            } else {
+              console.log(`[AutoExportHandler] ✅ File downloaded: ${filename} (ID: ${downloadId})`);
+              
+              // Save export state sau khi download thành công
+              chrome.storage.local.get(['scraper_export_state'], (result) => {
+                const currentState = result.scraper_export_state || {};
+                const newState = {
+                  lastExportedIndex: batchInfo.endIndex,
+                  totalLimit: currentState.totalLimit || null,
+                  timestamp: Date.now()
+                };
+                
+                chrome.storage.local.set({ scraper_export_state: newState }, () => {
+                  console.log('[AutoExportHandler] ✅ Saved export state:', newState);
+                  
+                  // Clear exported batch from scrapeDetailsState
+                  chrome.storage.local.get(['scrapeDetailsState'], (stateResult) => {
+                    if (stateResult.scrapeDetailsState) {
+                      const state = stateResult.scrapeDetailsState;
+                      if (state.details && state.details.length > batchInfo.endIndex) {
+                        state.details = state.details.slice(batchInfo.endIndex);
+                        chrome.storage.local.set({ scrapeDetailsState: state }, () => {
+                          console.log(`[AutoExportHandler] ✅ Cleared exported batch, remaining: ${state.details.length} items`);
+                        });
+                      }
+                    }
+                  });
+                  
+                  // Check if workflow complete
+                  if (currentState.totalLimit && batchInfo.endIndex >= currentState.totalLimit) {
+                    chrome.storage.local.remove(['scraper_export_state', 'currentExportBatch'], () => {
+                      console.log('[AutoExportHandler] ✅ Workflow complete, cleared export state');
+                      
+                      // Show badge
+                      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                        if (tabs && tabs.length > 0 && tabs[0].id) {
+                          chrome.runtime.sendMessage({
+                            action: 'workflowComplete'
+                          });
+                        }
+                      });
+                    });
+                  }
+                });
+              });
+            }
+          });
+        }, 1000); // Delay 1s trước khi export
+      } catch (error) {
+        console.error('[AutoExportHandler] ❌ Error:', error);
+      }
+    }
+  };
+
+  // Helper function for auto export
+  function handleAutoExportInBackground(data, batchInfo) {
+    AutoExportHandler.handleAutoExport(data, batchInfo);
+  }
 
   // ============================================
   // 🚀 INITIALIZATION
@@ -142,10 +365,11 @@
     // Forward pagination completion to all tabs (popup might be listening)
     if (request.action === 'paginationComplete') {
       const isListAndDetails = request.requestId && String(request.requestId).startsWith('listAndDetails_');
+      const isWorkflow = request.requestId && String(request.requestId).startsWith('workflow_');
       
-      // For listAndDetails requests, don't show badge and don't consume message
-      // Let message propagate to popup listener
-      if (isListAndDetails) {
+      // For listAndDetails or workflow requests, don't show badge and don't consume message
+      // Let message propagate to popup listener (workflow will continue to scrape details)
+      if (isListAndDetails || isWorkflow) {
         // Don't process, don't consume - let message reach popup
         return; // Return undefined - message will propagate to popup
       }
@@ -168,10 +392,11 @@
 
     if (request.action === 'scrollComplete') {
       const isListAndDetails = request.requestId && String(request.requestId).startsWith('listAndDetails_');
+      const isWorkflow = request.requestId && String(request.requestId).startsWith('workflow_');
       
-      // For listAndDetails requests, don't show badge and don't consume message
-      // Let message propagate to popup listener
-      if (isListAndDetails) {
+      // For listAndDetails or workflow requests, don't show badge and don't consume message
+      // Let message propagate to popup listener (workflow will continue to scrape details)
+      if (isListAndDetails || isWorkflow) {
         // Don't process, don't consume - let message reach popup
         return; // Return undefined - message will propagate to popup
       }
@@ -192,7 +417,47 @@
       return; // Return undefined - don't consume, let message propagate
     }
 
+    // Handle auto-export batch (mỗi 100 items) - xử lý trong background để hoạt động ngay cả khi popup đóng
+    if (request.action === 'autoExportBatch') {
+      console.log('[Background] 📤 Auto-export batch received:', {
+        batchNumber: request.batchNumber,
+        startIndex: request.startIndex,
+        endIndex: request.endIndex,
+        dataLength: request.data?.length || 0
+      });
+      
+      // Validate data
+      if (!request.data || !Array.isArray(request.data) || request.data.length === 0) {
+        console.error('[Background] ❌ Invalid export data');
+        sendResponse({ success: false, error: 'Invalid data' });
+        return true;
+      }
+      
+      // Prepare batch info
+      const batchInfo = {
+        startIndex: request.startIndex,
+        endIndex: request.endIndex,
+        batchNumber: request.batchNumber
+      };
+      
+      // Store batch info (optional, for tracking)
+      chrome.storage.local.set({ currentExportBatch: batchInfo }, () => {
+        // Export directly in background - delay 1s đã được handle trong handleAutoExport
+        handleAutoExportInBackground(request.data, batchInfo);
+      });
+      
+      sendResponse({ success: true });
+      return true; // Consume message
+    }
+
     if (request.action === 'detailsScrapingComplete') {
+      // Don't show badge immediately - wait for export to complete
+      // Badge will be shown after export completes (handled in export-handler)
+      return false;
+    }
+    
+    // New action: show badge after export completes
+    if (request.action === 'workflowComplete') {
       if (sender?.tab?.id) showDoneBadge(sender.tab.id);
       return false;
     }

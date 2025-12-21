@@ -372,20 +372,18 @@
       const stateKeysToRemove = [
         'scrapeDetailsState',
         'paginationState',
-        // Export state (clear to avoid conflicts with previous session)
-        'scraper_export_state',
+        // Export related keys (clear to avoid conflicts with previous session)
         'currentExportBatch',
+        'exportCompleted',
+        'pendingAutoExport',
         window.DataScraperStateManager?.KEYS?.PAGINATION,
         window.DataScraperStateManager?.KEYS?.DETAIL_LIST,
         window.DataScraperStateManager?.KEYS?.API_CACHE
       ].filter(Boolean);
       
-      console.log('[ScrapeListAndDetails] Clearing existing states before starting:', stateKeysToRemove);
       chrome.storage.local.remove(stateKeysToRemove, () => {
         if (chrome.runtime.lastError) {
           console.error('[ScrapeListAndDetails] Error clearing states:', chrome.runtime.lastError);
-        } else {
-          console.log('[ScrapeListAndDetails] Successfully cleared existing states');
         }
         // Continue after cleanup
       });
@@ -416,64 +414,25 @@
         return;
       }
       
-      // Check export state to continue from last exported index
-      window.DataScraperExportHandler?.getExportState().then((exportState) => {
-        if (exportState && exportState.lastExportedIndex !== undefined) {
-          const lastIndex = exportState.lastExportedIndex;
-          const totalLimit = exportState.totalLimit || (skipProducts + maxProducts);
-          
-          // Continue from last exported index
-          skipProducts = lastIndex;
-          
-          console.log('[ScrapeListAndDetails] Continuing from export state:', {
-            lastExportedIndex: lastIndex,
-            newSkip: skipProducts,
-            totalLimit: totalLimit
-          });
-          
-          // Check if we've reached total limit
-          if (skipProducts >= totalLimit) {
-            window.PopupDisplay.showMessage(
-              `✅ Đã scrape đủ ${totalLimit} sản phẩm. Hoàn tất!`,
-              'success'
-            );
-            // Clear export state
-            window.DataScraperExportHandler?.clearExportState();
-            return;
-          }
-          
-          // Update remaining limit (scrape in batches of maxProducts, but don't exceed totalLimit)
-          const remainingLimit = Math.min(maxProducts, totalLimit - skipProducts);
-          if (remainingLimit <= 0) {
-            window.PopupDisplay.showMessage(
-              `✅ Đã scrape đủ ${totalLimit} sản phẩm. Hoàn tất!`,
-              'success'
-            );
-            window.DataScraperExportHandler?.clearExportState();
-            return;
-          }
-          
-          maxProducts = remainingLimit; // Update limit for this batch
-          
-          window.PopupDisplay.showMessage(
-            `🔄 Tiếp tục scrape từ item ${skipProducts + 1} (còn lại ${remainingLimit} items)...`,
-            'loading'
-          );
-        } else {
-          // No export state, save total limit for first time
-          const totalLimit = skipProducts + maxProducts;
-          chrome.storage.local.set({
-            scraper_export_state: {
-              lastExportedIndex: 0,
-              totalLimit: totalLimit,
-              timestamp: Date.now()
+      // Extract titleSlug from current URL and save to storage
+      // Example: https://nhathuoclongchau.com.vn/thuoc/thuoc-dieu-tri-ung-thu -> "thuoc/thuoc-dieu-tri-ung-thu"
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs && tabs.length > 0 && tabs[0].url) {
+          try {
+            const url = new URL(tabs[0].url);
+            // Extract path segments (remove empty strings and .html files)
+            const pathSegments = url.pathname.split('/')
+              .filter(p => p && !p.includes('.html') && !p.includes('.'));
+            
+            if (pathSegments.length > 0) {
+              const titleSlug = pathSegments.join('/');
+              chrome.storage.local.set({ titleSlug: titleSlug });
             }
-          });
+          } catch (e) {
+            // Ignore errors
+          }
         }
         
-        proceedWithScrapingInternal(skipProducts, maxProducts);
-      }).catch(() => {
-        // No export state, proceed normally
         proceedWithScrapingInternal(skipProducts, maxProducts);
       });
       
@@ -639,15 +598,11 @@
               
               // Only export manually if format was selected (from 1click button)
               if (manualFormat && result.details && result.details.length > 0) {
-                console.log('[EcommerceHandlers] Manual export (1click), using format:', manualFormat);
-                
                 // Clear manual format after use
                 chrome.storage.local.remove(['manualExportFormat'], () => {
                   // Export with selected format (no modal, format already chosen)
                   window.DataScraperExportHandler.exportData(manualFormat, result.details);
                 });
-              } else {
-                console.log('[EcommerceHandlers] No manual export format found, skipping export (auto-export handled separately)');
               }
             });
 

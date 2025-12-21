@@ -82,9 +82,8 @@
       if (typeof chrome.downloads?.show === 'function') {
         try {
           chrome.downloads.show(downloadId);
-          console.log('[ExportHandler] ✅ chrome.downloads.show called successfully');
         } catch (e) {
-          console.warn('[ExportHandler] ⚠️  Error calling chrome.downloads.show:', e);
+          // Ignore errors
         }
       }
     },
@@ -100,9 +99,6 @@
         const processedContent = format === 'csv' ? '\ufeff' + content : content;
         const blob = new Blob([processedContent], { type: mimeType + ';charset=utf-8;' });
         const blobUrl = URL.createObjectURL(blob);
-        
-        const sizeInMB = blob.size / (1024 * 1024);
-        console.log(`[ExportHandler] Downloading via Chrome API, size: ${sizeInMB.toFixed(2)}MB`);
         
         // Validate inputs
         if (!blobUrl?.startsWith('blob:') || !filename?.trim()) {
@@ -127,14 +123,11 @@
                 this._revokeBlobURL(blobUrl);
                 
                 if (errorMsg.includes('USER_CANCELED')) {
-                  console.log('[ExportHandler] User canceled download');
                   downloadCallback();
                 } else {
                   this._handleError(new Error(errorMsg), 'Lỗi khi tải xuống', downloadCallback);
                 }
               } else {
-                console.log('[ExportHandler] Download started successfully:', filename, 'ID:', downloadId);
-                
                 // Try to show download in manager (optional)
                 this._showDownloadInManager(downloadId);
                 
@@ -170,17 +163,32 @@
     exportData: function(format, data) {
       // Early validation
       if (this.isExporting) {
-        console.warn('[ExportHandler] Export already in progress');
         window.PopupDisplay?.showMessage('Đang export, vui lòng đợi...', 'warning');
         return;
       }
       
+      // Check if this is auto-export (from background) - skip debounce for auto-export
+      chrome.storage.local.get(['currentExportBatch'], (result) => {
+        const isAutoExport = result.currentExportBatch !== undefined;
+        
+        // Only apply debounce for manual exports, not auto-export
+        if (!isAutoExport) {
       const now = Date.now();
       if (now - this.lastExportTime < this.EXPORT_DEBOUNCE_MS) {
-        console.warn('[ExportHandler] Export request too soon');
         return;
       }
       this.lastExportTime = now;
+        }
+        
+        // Continue with export logic
+        this._doExport(format, data);
+      });
+    },
+    
+    /**
+     * Internal export function (separated to handle async debounce check)
+     */
+    _doExport: function(format, data) {
 
       if (!data || !Array.isArray(data) || data.length === 0) {
         window.PopupDisplay?.showMessage('Không có dữ liệu để export', 'error');
@@ -192,17 +200,15 @@
         chrome.storage.local.get(['currentExportBatch', 'manualExportFormat'], (result) => {
           // If auto-export batch, use CSV format directly (no modal)
           if (result.currentExportBatch) {
-            console.log('[ExportHandler] Auto-export detected, using CSV format directly (no modal)');
-            this.exportData('csv', data);
+            this._doExport('csv', data);
             return;
           }
           
           // If manual format was selected (from 1click), use it (no modal)
           if (result.manualExportFormat) {
-            console.log('[ExportHandler] Manual format detected, using:', result.manualExportFormat);
             // Clear manual format after use
             chrome.storage.local.remove(['manualExportFormat'], () => {
-              this.exportData(result.manualExportFormat, data);
+              this._doExport(result.manualExportFormat, data);
             });
             return;
           }
@@ -218,17 +224,32 @@
         return;
       }
 
+      // Clear exportCompleted flag when starting new export
+      chrome.storage.local.remove(['exportCompleted']);
+      
+      // Show loading modal
+      const loadingModal = document.getElementById('exportLoadingModal');
+      const loadingText = document.getElementById('exportLoadingText');
+      if (loadingModal) {
+        loadingModal.style.display = 'flex';
+        if (loadingText) {
+          loadingText.textContent = `Đang chuẩn bị export ${data.length} sản phẩm...`;
+        }
+      }
+      
       // Validate data
       let validation;
       try {
         validation = this._validateData(data);
       } catch (error) {
         this._handleError(error, 'Lỗi khi kiểm tra dữ liệu');
+        if (loadingModal) loadingModal.style.display = 'none';
         return;
       }
       
       if (!validation.valid) {
         window.PopupDisplay?.showMessage(validation.message, 'error');
+        if (loadingModal) loadingModal.style.display = 'none';
         return;
       }
 
@@ -243,8 +264,11 @@
       // Split files if > 100 items (for CSV only)
       if (format === 'csv' && data.length > this.ITEMS_PER_FILE) {
         const totalFiles = Math.ceil(data.length / this.ITEMS_PER_FILE);
-        window.PopupDisplay?.showMessage(`Đang chia ${data.length} items thành ${totalFiles} files...`, 'loading');
-        console.log(`[ExportHandler] Splitting ${data.length} items into ${totalFiles} files`);
+        const loadingModal = document.getElementById('exportLoadingModal');
+        const loadingText = document.getElementById('exportLoadingText');
+        if (loadingModal && loadingText) {
+          loadingText.textContent = `Đang chia ${data.length} items thành ${totalFiles} files...`;
+        }
         
         setTimeout(() => {
           try {
@@ -252,6 +276,8 @@
           } catch (error) {
             this._handleError(error, 'Lỗi khi export nhiều file');
             if (autoExportCheckbox) autoExportCheckbox.disabled = false;
+            const loadingModal = document.getElementById('exportLoadingModal');
+            if (loadingModal) loadingModal.style.display = 'none';
           }
         }, 1000);
         return;
@@ -267,85 +293,46 @@
      * Export single file
      */
     _exportSingleFile: function(format, data) {
-      window.PopupDisplay?.showMessage('Đang chuẩn bị export...', 'loading');
+      const loadingModal = document.getElementById('exportLoadingModal');
+      const loadingText = document.getElementById('exportLoadingText');
+      if (loadingModal && loadingText) {
+        loadingText.textContent = `Đang export ${data.length} sản phẩm...`;
+      }
       
-      console.log(`[ExportHandler] _exportSingleFile called with format=${format}, data.length=${data?.length || 0}`);
-      
-      let exportContent;
-      try {
-        // For single file: startIndex = 0 (will be converted to 1 in generateExportContent)
-        // endIndex = data.length (actual number of items)
-        exportContent = this.generateExportContent(format, data, 0, data.length);
-        console.log('[ExportHandler] Content generated:', {
-          hasContent: !!exportContent?.content,
-          contentLength: exportContent?.content?.length || 0,
-          filename: exportContent?.filename,
-          mimeType: exportContent?.mimeType,
-          startIndex: 1,
-          endIndex: data.length
+      // For single file: startIndex = 0 (will be converted to 1 in generateExportContent)
+      // endIndex = data.length (actual number of items)
+      this.generateExportContent(format, data, 0, data.length, (exportContent) => {
+        if (!exportContent?.content) {
+          console.error('[ExportHandler] No content generated!');
+          window.PopupDisplay?.showMessage('Không thể tạo nội dung export', 'error');
+          this._resetExportState();
+          return;
+        }
+
+        const { content, filename, mimeType } = exportContent;
+        const blob = new Blob([content], { type: mimeType + ';charset=utf-8;' });
+        const sizeInMB = blob.size / (1024 * 1024);
+        
+        if (sizeInMB > 50) {
+          window.PopupDisplay?.showMessage('File quá lớn (>50MB). Vui lòng giảm số lượng dữ liệu.', 'error');
+          this._resetExportState();
+          return;
+        }
+
+        const downloadCallback = this._createDownloadCallback(() => {
+          // Show success modal
+          this._showExportCompleteModal([{ filename, format }], data.length);
         });
-      } catch (error) {
-        console.error('[ExportHandler] Error generating content:', error);
-        this._handleError(error, 'Lỗi khi tạo nội dung export');
-        return;
-      }
-      
-      if (!exportContent?.content) {
-        console.error('[ExportHandler] No content generated!');
-        window.PopupDisplay?.showMessage('Không thể tạo nội dung export', 'error');
-        this._resetExportState();
-        return;
-      }
 
-      const { content, filename, mimeType } = exportContent;
-      console.log('[ExportHandler] Creating blob from content, length:', content.length);
-      const blob = new Blob([content], { type: mimeType + ';charset=utf-8;' });
-      const sizeInMB = blob.size / (1024 * 1024);
-      console.log('[ExportHandler] Blob created, size:', sizeInMB.toFixed(2), 'MB');
-      
-      if (sizeInMB > 50) {
-        window.PopupDisplay?.showMessage('File quá lớn (>50MB). Vui lòng giảm số lượng dữ liệu.', 'error');
-        this._resetExportState();
-        return;
-      }
+        // Large files: always use Chrome Downloads API (no DOM hack)
+        if (blob.size > this.MAX_BACKGROUND_SIZE) {
+          this._downloadViaChromeAPI(content, filename, mimeType, format, downloadCallback);
+          return;
+        }
 
-      const downloadCallback = this._createDownloadCallback(() => {
-        // Extract range from filename or use data length
-        const match = filename.match(/-(\d+)-(\d+)\./);
-        const lastExportedIndex = match ? parseInt(match[2]) : data.length;
-        
-        // Show modal first
-        this._showExportCompleteModal([{ filename, format }], data.length);
-        
-        // Save state after delay (2s for single file)
-        setTimeout(() => {
-          if (lastExportedIndex > 0) {
-            this._saveExportState(lastExportedIndex).then(() => {
-              // Check if workflow complete
-              chrome.storage.local.get(['scraper_export_state'], (result) => {
-                const state = result.scraper_export_state || {};
-                if (state.totalLimit && lastExportedIndex >= state.totalLimit) {
-                  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                    if (tabs?.[0]?.id) {
-                      chrome.runtime.sendMessage({ action: 'workflowComplete' });
-                    }
-                  });
-                }
-              });
-            });
-          }
-        }, 2000);
+        // Small files: try background script first
+        this._tryBackgroundDownload(content, filename, mimeType, format, downloadCallback);
       });
-
-      // Large files: always use Chrome Downloads API (no DOM hack)
-      if (blob.size > this.MAX_BACKGROUND_SIZE) {
-        console.log(`[ExportHandler] File size ${sizeInMB.toFixed(2)}MB > ${(this.MAX_BACKGROUND_SIZE / (1024 * 1024)).toFixed(2)}MB, using Chrome Downloads API`);
-        this._downloadViaChromeAPI(content, filename, mimeType, format, downloadCallback);
-        return;
-      }
-
-      // Small files: try background script first
-      this._tryBackgroundDownload(content, filename, mimeType, format, downloadCallback);
     },
 
     /**
@@ -354,7 +341,6 @@
     _tryBackgroundDownload: function(content, filename, mimeType, format, callback) {
       const contentSize = new Blob([content]).size;
       if (contentSize > this.MAX_BACKGROUND_SIZE) {
-        console.log('[ExportHandler] Content too large for message, using Chrome Downloads API');
         this._downloadViaChromeAPI(content, filename, mimeType, format, callback);
         return;
       }
@@ -367,7 +353,6 @@
           mimeType: mimeType
         }, (response) => {
           if (chrome.runtime.lastError || !response?.success) {
-            console.warn('[ExportHandler] Background download failed, using Chrome Downloads API');
             this._downloadViaChromeAPI(content, filename, mimeType, format, callback);
           } else {
             this._resetExportState();
@@ -381,10 +366,10 @@
     },
 
     /**
-     * Generate export content
+     * Generate export content (async to get titleSlug from storage)
+     * Uses titleSlug from storage if available, otherwise falls back to categorySlug from data
      */
-    generateExportContent: function(format, data, startIndex = 0, endIndex = null) {
-      const categorySlug = this._extractCategorySlug(data);
+    generateExportContent: function(format, data, startIndex = 0, endIndex = null, callback) {
       // endIndex should be actual number of items, not limit
       const actualEndIndex = endIndex !== null ? endIndex : data.length;
       // startIndex should start from 1, not 0
@@ -393,31 +378,40 @@
       // Always include index range in filename
       const indexSuffix = `-${actualStartIndex}-${actualEndIndex}`;
       
-      if (format === 'json') {
-        const content = JSON.stringify(data, null, 2);
-        const filename = categorySlug 
-          ? `scraped-data-${categorySlug}${indexSuffix}.json`
-          : `scraped-data${indexSuffix}.json`;
-        return {
-          content: content,
-          filename: filename,
-          mimeType: 'application/json'
-        };
-      }
-      
-      if (format === 'csv') {
-        const content = this.convertToCSV(data);
-        const filename = categorySlug 
-          ? `scraped-data-${categorySlug}${indexSuffix}.csv`
-          : `scraped-data${indexSuffix}.csv`;
-        return {
-          content: content,
-          filename: filename,
-          mimeType: 'text/csv'
-        };
-      }
-      
-      return null;
+      // Get titleSlug from storage (priority 1)
+      this._getTitleSlug((titleSlug) => {
+        // Fallback to categorySlug from data if titleSlug not available
+        const categorySlug = titleSlug || this._extractCategorySlug(data);
+        const slug = categorySlug;
+        
+        if (format === 'json') {
+          const content = JSON.stringify(data, null, 2);
+          const filename = slug 
+            ? `scraped-data-${slug}${indexSuffix}.json`
+            : `scraped-data${indexSuffix}.json`;
+          callback({
+            content: content,
+            filename: filename,
+            mimeType: 'application/json'
+          });
+          return;
+        }
+        
+        if (format === 'csv') {
+          const content = this.convertToCSV(data);
+          const filename = slug 
+            ? `scraped-data-${slug}${indexSuffix}.csv`
+            : `scraped-data${indexSuffix}.csv`;
+          callback({
+            content: content,
+            filename: filename,
+            mimeType: 'text/csv'
+          });
+          return;
+        }
+        
+        callback(null);
+      });
     },
 
     /**
@@ -433,10 +427,13 @@
 
     /**
      * Extract category slug from data
-     * Converts "Thuốc/Thuốc giải độc, khử độc và hỗ trợ cai nghiện" 
-     * to "thuoc-thuocgiaidoc-khudoc-hotrocainghien"
+     * Priority: titleSlug (from storage) > categorySlug > categoryPath > category array > URL
+     * Format: "thuoc/thuoc-dieu-tri-ung-thu" -> "thuoc-thuoc-dieu-tri-ung-thu"
+     * Note: This is sync but titleSlug should be set before calling
      */
     _extractCategorySlug: function(data) {
+      // Note: titleSlug should be retrieved from storage before calling this
+      // For now, we'll extract from data and let caller handle titleSlug separately
       if (!data?.length) return '';
       
       const firstItem = data[0];
@@ -487,14 +484,33 @@
       
       return '';
     },
+    
+    /**
+     * Get titleSlug from storage (async)
+     */
+    _getTitleSlug: function(callback) {
+      chrome.storage.local.get(['titleSlug'], (result) => {
+        if (result.titleSlug) {
+          // Convert "thuoc/thuoc-dieu-tri-ung-thu" to "thuoc-thuoc-dieu-tri-ung-thu"
+          const slug = result.titleSlug.replace(/\//g, '-');
+          callback(slug);
+        } else {
+          callback(null);
+        }
+      });
+    },
 
     /**
      * Export CSV as multiple files
      */
     exportCSVMultipleFiles: function(data) {
       const totalFiles = Math.ceil(data.length / this.ITEMS_PER_FILE);
-      console.log(`[ExportHandler] Splitting ${data.length} items into ${totalFiles} files`);
-      window.PopupDisplay?.showMessage(`Đang export ${totalFiles} files...`, 'loading');
+      
+      const loadingModal = document.getElementById('exportLoadingModal');
+      const loadingText = document.getElementById('exportLoadingText');
+      if (loadingModal && loadingText) {
+        loadingText.textContent = `Đang export ${totalFiles} files...`;
+      }
       
       let headers = null;
       let currentFile = 0;
@@ -502,96 +518,101 @@
       
       const downloadedFiles = [];
       
-      const downloadNext = () => {
-        if (isCancelled || currentFile >= totalFiles) {
-          if (currentFile >= totalFiles) {
-            // All files downloaded, delay a bit to ensure all downloads complete
-            console.log(`[ExportHandler] All ${totalFiles} files downloaded, waiting before saving state...`);
-            setTimeout(() => {
-              this._resetExportState();
-              this._showExportCompleteModal(downloadedFiles, data.length);
-            }, 2000); // 2 second delay to ensure all downloads complete
+      // Get titleSlug from storage first
+      this._getTitleSlug((titleSlug) => {
+        const categorySlug = titleSlug || this._extractCategorySlug(data);
+        
+        const downloadNext = () => {
+          if (isCancelled || currentFile >= totalFiles) {
+            if (currentFile >= totalFiles) {
+              // All files downloaded, delay a bit to ensure all downloads complete
+              setTimeout(() => {
+                this._resetExportState();
+                this._showExportCompleteModal(downloadedFiles, data.length);
+              }, 2000); // 2 second delay to ensure all downloads complete
+            }
+            return;
           }
-          return;
-        }
 
-        // Collect headers from first chunk
-        if (!headers && currentFile === 0) {
-          try {
-            const firstChunk = data.slice(0, this.ITEMS_PER_FILE);
-            headers = this._collectHeaders(firstChunk);
-            if (!headers?.length) {
-              window.PopupDisplay?.showMessage('Không thể xác định header', 'error');
-              this._resetExportState();
+          // Collect headers from first chunk
+          if (!headers && currentFile === 0) {
+            try {
+              const firstChunk = data.slice(0, this.ITEMS_PER_FILE);
+              headers = this._collectHeaders(firstChunk);
+              if (!headers?.length) {
+                window.PopupDisplay?.showMessage('Không thể xác định header', 'error');
+                this._resetExportState();
+                return;
+              }
+            } catch (error) {
+              this._handleError(error, 'Lỗi khi thu thập headers');
               return;
             }
-            console.log(`[ExportHandler] Found ${headers.length} headers`);
-          } catch (error) {
-            this._handleError(error, 'Lỗi khi thu thập headers');
-            return;
           }
-        }
 
-        const start = currentFile * this.ITEMS_PER_FILE;
-        const end = Math.min(start + this.ITEMS_PER_FILE, data.length);
-        const chunk = data.slice(start, end);
-        const fileNumber = currentFile + 1;
-        
-        // Generate filename with category slug
-        // startIndex should start from 1, endIndex should be actual number of items
-        const categorySlug = this._extractCategorySlug(data);
-        const actualStartIndex = start + 1; // Start from 1, not 0
-        const actualEndIndex = end; // End is actual number of items
-        const filename = categorySlug 
-          ? `scraped-data-${categorySlug}-${actualStartIndex}-${actualEndIndex}.csv`
-          : `scraped-data-${actualStartIndex}-${actualEndIndex}.csv`;
-        
-        console.log(`[ExportHandler] Exporting file ${fileNumber}/${totalFiles} (items ${start}-${end-1})`);
-        window.PopupDisplay?.showMessage(`Đang export file ${fileNumber}/${totalFiles}...`, 'loading');
-        
-        setTimeout(() => {
-          if (isCancelled) return;
+          const start = currentFile * this.ITEMS_PER_FILE;
+          const end = Math.min(start + this.ITEMS_PER_FILE, data.length);
+          const chunk = data.slice(start, end);
+          const fileNumber = currentFile + 1;
           
-          // Helper to handle chunk error and continue
-          const handleChunkError = () => {
-            currentFile++;
-            if (currentFile >= totalFiles) this._resetExportState();
-            setTimeout(downloadNext, 200);
-          };
+          // Generate filename with titleSlug or categorySlug
+          // startIndex should start from 1, endIndex should be actual number of items
+          const actualStartIndex = start + 1; // Start from 1, not 0
+          const actualEndIndex = end; // End is actual number of items
+          const filename = categorySlug 
+            ? `scraped-data-${categorySlug}-${actualStartIndex}-${actualEndIndex}.csv`
+            : `scraped-data-${actualStartIndex}-${actualEndIndex}.csv`;
           
-          let content;
-          try {
-            content = this._convertChunkToCSV(headers, chunk);
-          } catch (error) {
-            console.error(`[ExportHandler] Error converting chunk ${fileNumber}:`, error);
-            handleChunkError();
-            return;
+          const loadingModal = document.getElementById('exportLoadingModal');
+          const loadingText = document.getElementById('exportLoadingText');
+          if (loadingModal && loadingText) {
+            loadingText.textContent = `Đang export file ${fileNumber}/${totalFiles}...`;
           }
           
-          if (!content) {
-            console.warn(`[ExportHandler] Empty content for file ${fileNumber}`);
-            handleChunkError();
-            return;
-          }
-          
-          try {
-            this._downloadViaChromeAPI(content, filename, 'text/csv', 'csv', () => {
-              downloadedFiles.push({ filename, format: 'csv' });
-              if (!isCancelled) {
-                currentFile++;
-                setTimeout(downloadNext, 3000); // Delay between files
-              } else {
-                this._resetExportState();
-              }
-            });
-          } catch (error) {
-            console.error(`[ExportHandler] Error downloading file ${fileNumber}:`, error);
-            handleChunkError();
-          }
-        }, 50);
-      };
-      
-      downloadNext();
+          setTimeout(() => {
+            if (isCancelled) return;
+            
+            // Helper to handle chunk error and continue
+            const handleChunkError = () => {
+              currentFile++;
+              if (currentFile >= totalFiles) this._resetExportState();
+              setTimeout(downloadNext, 200);
+            };
+            
+            let content;
+            try {
+              content = this._convertChunkToCSV(headers, chunk);
+            } catch (error) {
+              console.error(`[ExportHandler] Error converting chunk ${fileNumber}:`, error);
+              handleChunkError();
+              return;
+            }
+            
+            if (!content) {
+              console.warn(`[ExportHandler] Empty content for file ${fileNumber}`);
+              handleChunkError();
+              return;
+            }
+            
+            try {
+              this._downloadViaChromeAPI(content, filename, 'text/csv', 'csv', () => {
+                downloadedFiles.push({ filename, format: 'csv' });
+                if (!isCancelled) {
+                  currentFile++;
+                  setTimeout(downloadNext, 3000); // Delay between files
+                } else {
+                  this._resetExportState();
+                }
+              });
+            } catch (error) {
+              console.error(`[ExportHandler] Error downloading file ${fileNumber}:`, error);
+              handleChunkError();
+            }
+          }, 50);
+        };
+        
+        downloadNext();
+      });
     },
 
 
@@ -749,23 +770,18 @@
      */
     convertToCSV: function(data) {
       if (!data || !Array.isArray(data) || data.length === 0) {
-        console.warn('[ExportHandler] Empty or invalid data in convertToCSV');
         return '';
       }
 
-      console.log(`[ExportHandler] convertToCSV: Processing ${data.length} items`);
-      
       let headers;
       try {
         headers = this._collectHeaders(data);
-        console.log(`[ExportHandler] Collected ${headers.length} headers:`, headers.slice(0, 10).join(', '), '...');
       } catch (error) {
         console.error('[ExportHandler] Error collecting headers:', error);
         throw new Error('Lỗi khi thu thập headers: ' + error.message);
       }
       
       if (!headers?.length) {
-        console.warn('[ExportHandler] No headers found');
         return '';
       }
 
@@ -776,7 +792,6 @@
       
       // Header row
       parts.push(headers.map(h => `"${this.escapeCSV(h)}"`).join(','));
-      console.log('[ExportHandler] Header row created, length:', parts[0].length);
       
       // Process data in chunks
       for (let chunkStart = 0; chunkStart < data.length; chunkStart += CHUNK_SIZE) {
@@ -804,16 +819,10 @@
         
         // Join chunk and add to parts (avoid building huge array)
         parts.push(chunkRows.join('\n'));
-        
-        // Log progress for large datasets
-        if (data.length > 200 && chunkEnd % 100 === 0) {
-          console.log(`[ExportHandler] Processed ${chunkEnd}/${data.length} rows`);
-        }
       }
 
       // Join all parts (more memory efficient than building huge array)
       const result = parts.join('\n');
-      console.log(`[ExportHandler] CSV conversion complete, total length: ${result.length} chars`);
       return result;
     },
 
@@ -1100,46 +1109,32 @@
 
     /**
      * Show export complete modal
+     * Hide loading modal and show success modal
      */
     _showExportCompleteModal: function(files, totalItems = null) {
-      // Check if this is auto-export - if so, only show success message, no modal
-      chrome.storage.local.get(['currentExportBatch', 'autoExportEnabled'], (result) => {
-        const isAutoExport = result.currentExportBatch !== undefined;
-        const autoExportEnabled = result.autoExportEnabled === true || result.autoExportEnabled === undefined;
-        
-        if (isAutoExport && autoExportEnabled) {
-          // Auto-export: only show success message, no modal
-          const fileCount = files.length;
-          const firstFile = files[0]?.filename || '';
-          const lastFile = files[files.length - 1]?.filename || '';
-          const firstMatch = firstFile.match(/-(\d+)-(\d+)\./);
-          const lastMatch = lastFile.match(/-(\d+)-(\d+)\./);
-          let exportedRange = '';
-          if (firstMatch && lastMatch) {
-            exportedRange = ` (items ${firstMatch[1]}-${lastMatch[2]})`;
-          }
-          
-          window.PopupDisplay?.showMessage(
-            `✅ Đã tự động export thành công ${fileCount} file${fileCount > 1 ? 's' : ''}${exportedRange}${totalItems ? ` / Tổng: ${totalItems} items` : ''}`,
-            'success'
-          );
-          return;
-        }
-        
-        // Manual export: show modal as before
-        const modal = document.getElementById('exportCompleteModal');
-        const infoDiv = document.getElementById('exportCompleteInfo');
-        
-        if (!modal || !infoDiv) {
-          // Fallback to simple message
-          window.PopupDisplay?.showMessage(
-            `Đã export thành công ${files.length} file(s)!`,
-            'success'
-          );
-          return;
-        }
+      // Hide loading modal
+      const loadingModal = document.getElementById('exportLoadingModal');
+      if (loadingModal) {
+        loadingModal.style.display = 'none';
+      }
+      
+      // Show success modal
+      const modal = document.getElementById('exportCompleteModal');
+      const infoDiv = document.getElementById('exportCompleteInfo');
+      
+      if (!modal || !infoDiv) {
+        // Fallback to simple message
+        window.PopupDisplay?.showMessage(
+          `Đã export thành công ${files.length} file(s)!`,
+          'success'
+        );
+        return;
+      }
+      
+      // Mark export as completed
+      chrome.storage.local.set({ exportCompleted: true });
 
-        const fileCount = files.length;
+      const fileCount = files.length;
       
       // Get default download folder (browser's default)
       const downloadFolder = 'thư mục Downloads mặc định của trình duyệt';
@@ -1162,132 +1157,32 @@
         }
       }
       
-        // Save export state with delay to ensure files are saved (3 seconds for multiple files)
-        // Check if this is a batch export (auto-export mỗi 100 items)
-        chrome.storage.local.get(['currentExportBatch'], (batchResult) => {
-          const batchInfo = batchResult.currentExportBatch;
-          let exportIndex = lastExportedIndex;
-          
-          // If batch export, use batch endIndex
-          if (batchInfo && batchInfo.endIndex) {
-            exportIndex = batchInfo.endIndex;
-            console.log(`[ExportHandler] Batch export detected, using endIndex: ${exportIndex}`);
-          }
-          
-          if (exportIndex > 0) {
-            const delay = fileCount > 1 ? 3000 : 2000; // Longer delay for multiple files
-            setTimeout(() => {
-              this._saveExportState(exportIndex).then(() => {
-                // Clear batch info after saving state
-                if (batchInfo) {
-                  chrome.storage.local.remove(['currentExportBatch'], () => {
-                    console.log('[ExportHandler] Cleared batch info after export');
-                    
-                    // Clear exported batch from scrapeDetailsState
-                    chrome.storage.local.get(['scrapeDetailsState'], (stateResult) => {
-                      if (stateResult.scrapeDetailsState) {
-                        const state = stateResult.scrapeDetailsState;
-                        // Remove exported batch from details (keep only unexported items)
-                        if (state.details && state.details.length > exportIndex) {
-                          state.details = state.details.slice(exportIndex);
-                          chrome.storage.local.set({ scrapeDetailsState: state }, () => {
-                            console.log(`[ExportHandler] Cleared exported batch, remaining: ${state.details.length} items`);
-                          });
-                        }
-                      }
-                    });
-                  });
-                }
-                // State saved, workflowComplete will be triggered in _saveExportState if limit reached
-              });
-            }, delay);
-          }
-        });
-        
-        infoDiv.innerHTML = `
-          <div style="margin-bottom: 15px;">
-            <strong>✅ Đã xuất thành công:</strong> ${fileCount} file${fileCount > 1 ? 's' : ''}
-            ${exportedRange ? ` (items ${exportedRange})` : ''}
-            ${totalItems ? ` / Tổng: ${totalItems} items` : ''}
-          </div>
-          <div style="margin-bottom: 15px;">
-            <strong>📁 Đường dẫn folder:</strong><br>
-            <span style="color: #666; font-size: 12px;">${downloadFolder}</span>
-          </div>
-        `;
-        
-        modal.style.display = 'flex';
-        
-        // Clear data after export
-        this._clearDataAfterExport();
-      }); // End of chrome.storage.local.get callback
+      // Clear batch info if exists
+      chrome.storage.local.remove(['currentExportBatch']);
+      
+      infoDiv.innerHTML = `
+        <div style="margin-bottom: 15px;">
+          <strong>✅ Đã xuất thành công:</strong> ${fileCount} file${fileCount > 1 ? 's' : ''}
+          ${exportedRange ? ` (items ${exportedRange})` : ''}
+          ${totalItems ? ` / Tổng: ${totalItems} items` : ''}
+        </div>
+        <div style="margin-bottom: 15px;">
+          <strong>📁 Đường dẫn folder:</strong><br>
+          <span style="color: #666; font-size: 12px;">${downloadFolder}</span>
+        </div>
+      `;
+      
+      modal.style.display = 'flex';
+      
+      // Clear data after export
+      this._clearDataAfterExport();
     },
 
-    /**
-     * Save export state for continuation
-     */
-    _saveExportState: function(lastExportedIndex) {
-      return new Promise((resolve) => {
-        chrome.storage.local.get(['scraper_export_state'], (result) => {
-          const currentState = result.scraper_export_state || {};
-          const newState = {
-            lastExportedIndex: lastExportedIndex,
-            totalLimit: currentState.totalLimit || null, // Keep total limit if exists
-            timestamp: Date.now()
-          };
-          
-          chrome.storage.local.set({ scraper_export_state: newState }, () => {
-            console.log('[ExportHandler] Saved export state:', newState);
-            
-            // Check if we've reached total limit
-            if (currentState.totalLimit && lastExportedIndex >= currentState.totalLimit) {
-              console.log('[ExportHandler] Reached total limit, clearing export state');
-              this.clearExportState();
-              
-              // Workflow complete - show badge after a delay to ensure all exports are done
-              setTimeout(() => {
-                chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                  if (tabs && tabs.length > 0 && tabs[0].id) {
-                    chrome.runtime.sendMessage({
-                      action: 'workflowComplete'
-                    });
-                  }
-                });
-              }, 1000);
-            }
-            
-            resolve(newState);
-          });
-        });
-      });
-    },
-
-    /**
-     * Get export state
-     */
-    getExportState: function() {
-      return new Promise((resolve) => {
-        chrome.storage.local.get(['scraper_export_state'], (result) => {
-          resolve(result.scraper_export_state || null);
-        });
-      });
-    },
-
-    /**
-     * Clear export state
-     */
-    clearExportState: function() {
-      chrome.storage.local.remove(['scraper_export_state'], () => {
-        console.log('[ExportHandler] Cleared export state');
-      });
-    },
 
     /**
      * Clear data after export
      */
     _clearDataAfterExport: function() {
-      console.log('[ExportHandler] Clearing data after export...');
-      
       // Clear in-memory data
       if (window.PopupState) {
         window.PopupState.clearDetailData();
@@ -1298,9 +1193,7 @@
       chrome.storage.local.remove([
         'scraper_detail_data',
         window.PopupState?.STORAGE_KEY_DETAIL
-      ].filter(Boolean), () => {
-        console.log('[ExportHandler] Data cleared after export');
-      });
+      ].filter(Boolean));
       
       // Clear results display
       if (window.PopupDisplay) {

@@ -67,22 +67,15 @@
           }
         });
 
-        console.log(`[Workflow] Đã load ${allProducts.length} sản phẩm từ list (yêu cầu: ${maxProductsToLoad})`);
-
         // Step 2: Extract links và apply skip/limit
         const allProductLinks = allProducts
           .map(p => p.link || p.url || p.href)
           .filter(link => link && link.includes('.html'));
 
-        console.log(`[Workflow] Tổng số links: ${allProductLinks.length}`);
-
         // Apply skip và limit
         const startIndex = skip;
         const endIndex = skip + limit;
         const productLinks = allProductLinks.slice(startIndex, endIndex);
-
-        console.log(`[Workflow] Skip: ${skip}, Limit: ${limit}`);
-        console.log(`[Workflow] Links sau khi apply skip/limit: ${productLinks.length} (range: ${startIndex + 1}-${endIndex})`);
 
         if (productLinks.length === 0) {
           const errorMsg = `Không có link nào sau khi skip ${skip} items. Tổng số links: ${allProductLinks.length}`;
@@ -114,8 +107,6 @@
             }
           }
         });
-
-        console.log(`[Workflow] Đã scrape ${details.length}/${productLinks.length} sản phẩm detail`);
 
         // Step 4: Complete
         if (onComplete) {
@@ -164,7 +155,6 @@
             chrome.runtime.onMessage.removeListener(messageListener);
             
             const products = message.data || [];
-            console.log(`[Workflow] Received ${products.length} products from ${method}`);
             
             if (onProgress) {
               onProgress({
@@ -199,7 +189,6 @@
           const itemsPerScroll = 8; // Conservative estimate based on actual behavior
           const buffer = 40; // Large buffer to ensure we don't stop early
           scrapeOptions.maxScrolls = Math.ceil(maxProducts / itemsPerScroll) + buffer;
-          console.log(`[Workflow] Calculated maxScrolls: ${scrapeOptions.maxScrolls} (for ${maxProducts} products, ${itemsPerScroll} items/scroll, buffer: ${buffer})`);
         } else {
           scrapeOptions.nextPageSelector = nextPageSelector;
           scrapeOptions.pageDelay = 2000;
@@ -259,7 +248,6 @@
             chrome.runtime.onMessage.removeListener(detailsListener);
             
             const scrapedDetails = message.data || [];
-            console.log(`[Workflow] Received ${scrapedDetails.length} details`);
             
             resolve(scrapedDetails);
             sendResponse({ success: true });

@@ -15,6 +15,16 @@
       setupEventListeners(tab);
       window.PopupDisplay.loadPageInfo(tab);
       
+      // Set defaults: autoExportEnabled=true, manualExportFormat=csv
+      chrome.storage.local.get(['autoExportEnabled', 'manualExportFormat'], (result) => {
+        if (result.autoExportEnabled === undefined) {
+          chrome.storage.local.set({ autoExportEnabled: true });
+        }
+        if (!result.manualExportFormat) {
+          chrome.storage.local.set({ manualExportFormat: 'csv' });
+        }
+      });
+      
       // Listen for details scraping completion
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Auto-export batch được xử lý trong background script
@@ -26,21 +36,13 @@
         }
         
         if (message.action === 'detailsScrapingComplete') {
-          console.log('[PopupMain] Received detailsScrapingComplete:', {
-            dataLength: message.data?.length || 0,
-            maxProducts: message.maxProducts,
-            hasData: !!message.data
-          });
-          
           const details = message.data || [];
           
           if (!details || details.length === 0) {
-            console.warn('[PopupMain] No details data received, checking storage...');
             // Fallback: try to load from storage
             setTimeout(() => {
               const savedDetailData = window.PopupState.getDetailData();
               if (savedDetailData && savedDetailData.length > 0) {
-                console.log('[PopupMain] Found data in storage, displaying...');
                 window.PopupDisplay.displayResults(savedDetailData, { 
                   maxProducts: savedDetailData.length 
                 });
@@ -49,7 +51,7 @@
                   'success'
                 );
               } else {
-                console.error('[PopupMain] No data found in storage either');
+                console.error('[PopupMain] No data found in storage');
                 window.PopupDisplay.showMessage('Không tìm thấy dữ liệu. Vui lòng scrape lại.', 'error');
               }
             }, 500);
@@ -57,12 +59,10 @@
             return true;
           }
           
-          console.log('[PopupMain] Setting detail data and displaying...', details.length);
           window.PopupState.setDetailData(details);
           
           // Force display results section with data
           if (details && details.length > 0) {
-            console.log('[PopupMain] Calling displayResults with', details.length, 'items');
             window.PopupDisplay.displayResults(details, { 
               maxProducts: message.maxProducts || details.length 
             });
@@ -75,15 +75,11 @@
               // Only export manually if format was selected (from 1click button)
               // Don't export here if auto-export is enabled (already handled in background)
               if (manualFormat && details.length > 0) {
-                console.log('[PopupMain] Manual export (1click) - using format:', manualFormat);
-                
                 // Clear manual format after use
                 chrome.storage.local.remove(['manualExportFormat'], () => {
                   // Export with selected format (no modal, format already chosen)
                   window.DataScraperExportHandler.exportData(manualFormat, details);
                 });
-              } else {
-                console.log('[PopupMain] No manual export format found, skipping export (auto-export handled separately)');
               }
             });
           }
@@ -112,80 +108,72 @@
       // Restore and display saved data if exists (priority: detail > list)
       // Wait a bit to ensure loadSavedData is complete
       setTimeout(() => {
-        console.log('[PopupMain] Checking for saved data to restore...');
         const savedDetailData = window.PopupState.getDetailData();
         const savedListData = window.PopupState.getListData();
         
-        console.log('[PopupMain] Saved data:', {
-          detailLength: savedDetailData?.length || 0,
-          listLength: savedListData?.length || 0
-        });
-        
-        // Check export state - if auto-export is in progress or completed, only show success message
-        chrome.storage.local.get(['scraper_export_state', 'autoExportEnabled'], (exportResult) => {
-          const exportState = exportResult.scraper_export_state || {};
-          const autoExportEnabled = exportResult.autoExportEnabled;
-          const hasExportState = exportState.lastExportedIndex !== undefined;
-          const isAutoExportEnabled = autoExportEnabled === true || autoExportEnabled === undefined;
+        // NEW WORKFLOW: Check if user clicked popup after scraping is complete (has badge)
+        // If has data and badge, trigger export automatically
+        chrome.storage.local.get(['autoExportEnabled', 'manualExportFormat', 'titleSlug'], (result) => {
+          const autoExportEnabled = result.autoExportEnabled !== false; // Default true
+          const manualExportFormat = result.manualExportFormat || 'csv'; // Default csv
+          const titleSlug = result.titleSlug || '';
           
-          // If auto-export is enabled and has export state, only show success message (no export modal)
-          if (hasExportState && isAutoExportEnabled) {
-            const lastExported = exportState.lastExportedIndex || 0;
-            const totalLimit = exportState.totalLimit || 0;
-            const isComplete = totalLimit > 0 && lastExported >= totalLimit;
-            
-            if (savedDetailData && Array.isArray(savedDetailData) && savedDetailData.length > 0) {
-              console.log('[PopupMain] Auto-export in progress, showing success message only');
-              window.PopupDisplay.displayResults(savedDetailData, { 
-                maxProducts: savedDetailData.length 
-              });
-              
-              if (isComplete) {
-                window.PopupDisplay.showMessage(
-                  `✅ Đã scrape và export thành công ${totalLimit} sản phẩm. Hoàn tất!`, 
-                  'success'
-                );
-                // Show badge if workflow complete
-                chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                  if (tabs && tabs.length > 0 && tabs[0].id) {
-                    chrome.runtime.sendMessage({
-                      action: 'workflowComplete'
-                    });
-                  }
-                });
-              } else {
-                window.PopupDisplay.showMessage(
-                  `✅ Đã scrape ${savedDetailData.length} sản phẩm. Đã export ${lastExported}/${totalLimit} items. Đang tiếp tục...`, 
-                  'success'
-                );
-              }
-            } else if (savedListData && Array.isArray(savedListData) && savedListData.length > 0) {
-              console.log('[PopupMain] Auto-export in progress, showing success message only');
-              window.PopupDisplay.displayResults(savedListData, { 
-                maxProducts: savedListData.length 
-              });
-              window.PopupDisplay.showMessage(
-                `✅ Đã scrape ${savedListData.length} sản phẩm. Đã export ${lastExported}/${totalLimit} items. Đang tiếp tục...`, 
-                'success'
-              );
-            }
-            return; // Don't trigger export modal
-          }
-          
-          // Normal restore (no auto-export or export state)
+          // Check if we have scraped data and should trigger export
           if (savedDetailData && Array.isArray(savedDetailData) && savedDetailData.length > 0) {
-            console.log('[PopupMain] Restoring detail data:', savedDetailData.length, 'items');
-            // Restore detail data and show modal
-            window.PopupDisplay.displayResults(savedDetailData, { 
-              maxProducts: savedDetailData.length 
+            const totalItems = savedDetailData.length;
+            
+            // Check if export was already done (by checking if exportCompleteModal was shown)
+            chrome.storage.local.get(['exportCompleted'], (exportCheck) => {
+              if (exportCheck.exportCompleted) {
+                // Already exported, just show success message
+                window.PopupDisplay.displayResults(savedDetailData, { 
+                  maxProducts: savedDetailData.length 
+                });
+                window.PopupDisplay.showMessage(
+                  `✅ Đã scrape và export thành công ${totalItems} sản phẩm. Hoàn tất!`, 
+                  'success'
+                );
+                return;
+              }
+              
+              // Check if badge exists (scraping is complete) - trigger export
+              chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs && tabs.length > 0 && tabs[0].id) {
+                  // Check badge by trying to get badge text
+                  chrome.action.getBadgeText({ tabId: tabs[0].id }, (badgeText) => {
+                    const hasBadge = badgeText && badgeText.length > 0;
+                    
+                    if (hasBadge || true) { // Always trigger export when popup is opened with data
+                      // Show loading modal
+                      const loadingModal = document.getElementById('exportLoadingModal');
+                      const loadingText = document.getElementById('exportLoadingText');
+                      if (loadingModal) {
+                        loadingModal.style.display = 'flex';
+                        if (loadingText) {
+                          loadingText.textContent = `Đang export ${totalItems} sản phẩm...`;
+                        }
+                      }
+                      
+                      // Trigger export with format
+                      setTimeout(() => {
+                        window.DataScraperExportHandler.exportData(manualExportFormat, savedDetailData);
+                      }, 500);
+                    } else {
+                      // No badge, just show data
+                      window.PopupDisplay.displayResults(savedDetailData, { 
+                        maxProducts: savedDetailData.length 
+                      });
+                      window.PopupDisplay.showMessage(
+                        `✅ Đã scrape ${totalItems} sản phẩm. Click lại để export.`, 
+                        'success'
+                      );
+                    }
+                  });
+                }
+              });
             });
-            window.PopupDisplay.showMessage(
-              `✅ Đã khôi phục ${savedDetailData.length} chi tiết sản phẩm từ lần scrape trước`, 
-              'success'
-            );
           } else if (savedListData && Array.isArray(savedListData) && savedListData.length > 0) {
-            console.log('[PopupMain] Restoring list data:', savedListData.length, 'items');
-            // Restore list data and show modal
+            // List data - just show
             window.PopupDisplay.displayResults(savedListData, { 
               maxProducts: savedListData.length 
             });
@@ -193,8 +181,6 @@
               `✅ Đã khôi phục ${savedListData.length} sản phẩm trong danh sách từ lần scrape trước`, 
               'success'
             );
-          } else {
-            console.log('[PopupMain] No saved data to restore');
           }
         });
       }, 500); // Increase timeout to ensure DOM is ready
@@ -393,6 +379,17 @@
     
     // Export complete modal handlers
     setupExportCompleteModal();
+    
+    // Export loading modal handlers
+    setupExportLoadingModal();
+  }
+  
+  /**
+   * Setup export loading modal
+   */
+  function setupExportLoadingModal() {
+    // Modal will be shown/hidden by export handler
+    // No user interaction needed
   }
 
   /**

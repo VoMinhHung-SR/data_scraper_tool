@@ -227,96 +227,59 @@
     // Handle auto export in background
     handleAutoExport: (data, batchInfo) => {
       try {
-        console.log('[AutoExportHandler] Starting auto-export:', {
-          dataLength: data.length,
-          batchInfo
+        // Get titleSlug from storage (priority), fallback to extractCategorySlug
+        chrome.storage.local.get(['titleSlug'], (result) => {
+          let categorySlug = '';
+          if (result.titleSlug) {
+            // Convert "thuoc/thuoc-dieu-tri-ung-thu" to "thuoc-thuoc-dieu-tri-ung-thu"
+            categorySlug = result.titleSlug.replace(/\//g, '-');
+          } else {
+            // Fallback to extract from data
+            categorySlug = AutoExportHandler.extractCategorySlug(data);
+          }
+          
+          // Generate filename
+          const filename = categorySlug 
+            ? `scraped-data-${categorySlug}-${batchInfo.startIndex}-${batchInfo.endIndex}.csv`
+            : `scraped-data-${batchInfo.startIndex}-${batchInfo.endIndex}.csv`;
+          
+          // Continue with export...
+          // Convert to CSV
+          const csvContent = AutoExportHandler.convertToCSV(data);
+          
+          if (!csvContent || csvContent.length === 0) {
+            console.error('[AutoExportHandler] Empty CSV content');
+            return;
+          }
+          
+          // Check file size (max 50MB for data URL)
+          const contentSize = Utils.getContentSize(csvContent);
+          const sizeInMB = contentSize / (1024 * 1024);
+          
+          if (sizeInMB > 50) {
+            console.error(`[AutoExportHandler] File too large: ${sizeInMB.toFixed(2)}MB`);
+            return;
+          }
+          
+          // Create data URL (service worker không hỗ trợ blob URL)
+          const dataUrl = Utils.encodeToDataURL(csvContent, 'text/csv');
+          
+          // Download file với delay 1s
+          setTimeout(() => {
+            chrome.downloads.download({
+              url: dataUrl,
+              filename: filename,
+              saveAs: false // Auto-save to default downloads folder
+            }, (downloadId) => {
+              if (chrome.runtime.lastError) {
+                console.error('[AutoExportHandler] Download error:', chrome.runtime.lastError);
+              } else {
+                // Clear batch info after download
+                chrome.storage.local.remove(['currentExportBatch']);
+              }
+            });
+          }, 1000); // Delay 1s trước khi export
         });
-        
-        // Extract category slug
-        const categorySlug = AutoExportHandler.extractCategorySlug(data);
-        
-        // Generate filename
-        const filename = `scraped-data-${categorySlug}-${batchInfo.startIndex}-${batchInfo.endIndex}.csv`;
-        
-        // Convert to CSV
-        const csvContent = AutoExportHandler.convertToCSV(data);
-        
-        if (!csvContent || csvContent.length === 0) {
-          console.error('[AutoExportHandler] Empty CSV content');
-          return;
-        }
-        
-        // Check file size (max 50MB for data URL)
-        const contentSize = Utils.getContentSize(csvContent);
-        const sizeInMB = contentSize / (1024 * 1024);
-        
-        if (sizeInMB > 50) {
-          console.error(`[AutoExportHandler] File too large: ${sizeInMB.toFixed(2)}MB`);
-          return;
-        }
-        
-        // Create data URL (service worker không hỗ trợ blob URL)
-        const dataUrl = Utils.encodeToDataURL(csvContent, 'text/csv');
-        
-        console.log(`[AutoExportHandler] Created data URL, size: ${sizeInMB.toFixed(2)}MB`);
-        
-        // Download file với delay 1s
-        setTimeout(() => {
-          chrome.downloads.download({
-            url: dataUrl,
-            filename: filename,
-            saveAs: false // Auto-save to default downloads folder
-          }, (downloadId) => {
-            if (chrome.runtime.lastError) {
-              console.error('[AutoExportHandler] Download error:', chrome.runtime.lastError);
-            } else {
-              console.log(`[AutoExportHandler] ✅ File downloaded: ${filename} (ID: ${downloadId})`);
-              
-              // Save export state sau khi download thành công
-              chrome.storage.local.get(['scraper_export_state'], (result) => {
-                const currentState = result.scraper_export_state || {};
-                const newState = {
-                  lastExportedIndex: batchInfo.endIndex,
-                  totalLimit: currentState.totalLimit || null,
-                  timestamp: Date.now()
-                };
-                
-                chrome.storage.local.set({ scraper_export_state: newState }, () => {
-                  console.log('[AutoExportHandler] ✅ Saved export state:', newState);
-                  
-                  // Clear exported batch from scrapeDetailsState
-                  chrome.storage.local.get(['scrapeDetailsState'], (stateResult) => {
-                    if (stateResult.scrapeDetailsState) {
-                      const state = stateResult.scrapeDetailsState;
-                      if (state.details && state.details.length > batchInfo.endIndex) {
-                        state.details = state.details.slice(batchInfo.endIndex);
-                        chrome.storage.local.set({ scrapeDetailsState: state }, () => {
-                          console.log(`[AutoExportHandler] ✅ Cleared exported batch, remaining: ${state.details.length} items`);
-                        });
-                      }
-                    }
-                  });
-                  
-                  // Check if workflow complete
-                  if (currentState.totalLimit && batchInfo.endIndex >= currentState.totalLimit) {
-                    chrome.storage.local.remove(['scraper_export_state', 'currentExportBatch'], () => {
-                      console.log('[AutoExportHandler] ✅ Workflow complete, cleared export state');
-                      
-                      // Show badge
-                      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                        if (tabs && tabs.length > 0 && tabs[0].id) {
-                          chrome.runtime.sendMessage({
-                            action: 'workflowComplete'
-                          });
-                        }
-                      });
-                    });
-                  }
-                });
-              });
-            }
-          });
-        }, 1000); // Delay 1s trước khi export
       } catch (error) {
         console.error('[AutoExportHandler] ❌ Error:', error);
       }
@@ -342,6 +305,7 @@
   };
 
   const showDoneBadge = (tabId) => setBadge(tabId, '✓', '#4CAF50');
+  const showClickMeBadge = (tabId) => setBadge(tabId, 'click', '#FF6B6B');
   const clearBadge = (tabId) => setBadge(tabId, '', undefined);
 
   // Clear badge on install/update
@@ -374,8 +338,8 @@
         return; // Return undefined - message will propagate to popup
       }
       
-      // For standalone list scraping, show badge
-      if (sender?.tab?.id) showDoneBadge(sender.tab.id);
+      // For standalone list scraping, show click-me badge to notify user
+      if (sender?.tab?.id) showClickMeBadge(sender.tab.id);
       
       // Forward to all tabs (for content scripts that might be listening)
       chrome.tabs.query({}, (tabs) => {
@@ -401,8 +365,8 @@
         return; // Return undefined - message will propagate to popup
       }
       
-      // For standalone list scraping, show badge
-      if (sender?.tab?.id) showDoneBadge(sender.tab.id);
+      // For standalone list scraping, show click-me badge to notify user
+      if (sender?.tab?.id) showClickMeBadge(sender.tab.id);
       
       // Forward to all tabs (for content scripts that might be listening)
       chrome.tabs.query({}, (tabs) => {
@@ -419,13 +383,6 @@
 
     // Handle auto-export batch (mỗi 100 items) - xử lý trong background để hoạt động ngay cả khi popup đóng
     if (request.action === 'autoExportBatch') {
-      console.log('[Background] 📤 Auto-export batch received:', {
-        batchNumber: request.batchNumber,
-        startIndex: request.startIndex,
-        endIndex: request.endIndex,
-        dataLength: request.data?.length || 0
-      });
-      
       // Validate data
       if (!request.data || !Array.isArray(request.data) || request.data.length === 0) {
         console.error('[Background] ❌ Invalid export data');
@@ -451,8 +408,11 @@
     }
 
     if (request.action === 'detailsScrapingComplete') {
-      // Don't show badge immediately - wait for export to complete
-      // Badge will be shown after export completes (handled in export-handler)
+      // Show badge to notify user to click popup for download
+      const tabId = sender?.tab?.id;
+      if (tabId) {
+        showClickMeBadge(tabId);
+      }
       return false;
     }
     
@@ -460,6 +420,15 @@
     if (request.action === 'workflowComplete') {
       if (sender?.tab?.id) showDoneBadge(sender.tab.id);
       return false;
+    }
+    
+    // Show badge when scraping is complete (notify user to click popup for download)
+    if (request.action === 'showScrapeCompleteBadge') {
+      const tabId = sender?.tab?.id;
+      if (tabId) {
+        showClickMeBadge(tabId);
+      }
+      return false; // Don't consume message
     }
 
     if (request.action === 'clearBadge') {
@@ -493,14 +462,10 @@
   // 📥 DOWNLOAD COMPLETION HANDLER
   // ============================================
   chrome.downloads.onChanged.addListener((downloadDelta) => {
-    if (downloadDelta.state && downloadDelta.state.current === 'complete') {
-      console.log('✅ Download completed:', downloadDelta.id);
-    } else if (downloadDelta.error && downloadDelta.error.current) {
+    if (downloadDelta.error && downloadDelta.error.current) {
       const error = downloadDelta.error.current;
       // USER_CANCELED is not an error - user just canceled the download dialog
-      if (error === 'USER_CANCELED') {
-        console.log('ℹ️ Download canceled by user:', downloadDelta.id);
-      } else {
+      if (error !== 'USER_CANCELED') {
         console.error('❌ Download error:', error);
       }
     }

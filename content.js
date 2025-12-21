@@ -1205,59 +1205,8 @@
                 window.DataScraperProgressIndicator.update(newPercent);
               }
               
-              // Log progress for debugging
-              if (state.details.length % 50 === 0 || state.details.length === state.links.length) {
-                console.log(`[AutoScrape] Progress: ${state.details.length}/${state.links.length} details scraped (${state.currentIndex}/${state.links.length} links processed)`);
-              }
-              
-              // Auto-export mỗi khi đạt 100 items (hoặc bội số của 100)
-              const currentCount = state.details.length;
-              if (currentCount > 0 && currentCount % 100 === 0) {
-                // Delay 4s trước khi export
-                setTimeout(() => {
-                  // Check auto-export setting và trigger export
-                  chrome.storage.local.get(['scraper_export_state', 'autoExportEnabled'], (exportResult) => {
-                    const exportState = exportResult.scraper_export_state || {};
-                    const autoExportEnabled = exportResult.autoExportEnabled;
-                    
-                    // Auto-export nếu:
-                    // 1. Có totalLimit (đang trong workflow) VÀ
-                    // 2. (autoExportEnabled === true HOẶC autoExportEnabled === undefined - default enable)
-                    const shouldAutoExport = exportState.totalLimit && 
-                      (autoExportEnabled === true || autoExportEnabled === undefined);
-                    
-                    if (shouldAutoExport) {
-                      const batchStart = currentCount - 100 + 1;
-                      const batchEnd = currentCount;
-                      const batchData = state.details.slice(currentCount - 100, currentCount);
-                      
-                      console.log(`[AutoScrape] ✅ Đã scrape đủ ${currentCount} items, trigger export batch (${batchStart}-${batchEnd})...`);
-                      
-                      // Send message to background script to trigger export (không cần popup)
-                      chrome.runtime.sendMessage({
-                        action: 'autoExportBatch',
-                        data: batchData,
-                        batchNumber: Math.floor(currentCount / 100),
-                        startIndex: batchStart,
-                        endIndex: batchEnd,
-                        totalCount: currentCount
-                      }, (response) => {
-                        if (chrome.runtime.lastError) {
-                          console.error('[AutoScrape] ❌ Error sending autoExportBatch message:', chrome.runtime.lastError);
-                        } else {
-                          console.log(`[AutoScrape] ✅ Auto-export batch ${Math.floor(currentCount / 100)} triggered`);
-                        }
-                      });
-                    } else {
-                      console.log('[AutoScrape] ⏭️ Auto-export skipped:', {
-                        hasTotalLimit: !!exportState.totalLimit,
-                        autoExportEnabled: autoExportEnabled,
-                        shouldAutoExport: shouldAutoExport
-                      });
-                    }
-                  });
-                }, 4000); // Delay 4s trước khi export
-              }
+              // NEW WORKFLOW: No auto-export during scraping
+              // Export will be triggered when user clicks popup again (with badge)
             } else {
             }
           } catch (error) {
@@ -1280,13 +1229,6 @@
           // Chỉ check limit nếu đã xử lý hết links HOẶC đã scrape đủ limit
           // Nhưng ưu tiên xử lý hết links để không miss items
           if (hasProcessedAllLinks) {
-            console.log(`[AutoScrape] ✅ Completed: Đã xử lý hết tất cả links`, {
-              detailsScraped: state.details.length,
-              linksProcessed: state.currentIndex,
-              totalLinks: state.links.length,
-              effectiveLimit: effectiveLimit,
-              missingItems: state.links.length - state.details.length
-            });
             chrome.storage.local.remove(['scrapeDetailsState']);
             
             // Show completion indicator
@@ -1304,6 +1246,15 @@
                 maxProducts: state.maxDetails || state.details.length
               }
             }, () => {
+            });
+            
+            // Show badge notification to notify user to click popup for download
+            chrome.runtime.sendMessage({
+              action: 'showScrapeCompleteBadge',
+              itemCount: state.details.length,
+              type: 'detail'
+            }, () => {
+              // Ignore errors
             });
             
             // Send result to popup with retry mechanism
@@ -1402,7 +1353,6 @@
     const currentUrl = window.location.href;
     const lastUrl = result.scraper_last_url;
     if (lastUrl && lastUrl !== currentUrl && result.paginationState) {
-      console.log('[Content] URL changed, clearing pagination state');
       chrome.storage.local.remove(['paginationState']);
       chrome.storage.local.set({ scraper_last_url: currentUrl });
       return;

@@ -272,6 +272,11 @@ body {
   animation: modalSlideIn 0.3s ease-out;
 }
 
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 @keyframes modalSlideIn {
   from {
     opacity: 0;

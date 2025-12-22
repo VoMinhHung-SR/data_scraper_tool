@@ -63,12 +63,6 @@
           <div class="stats" id="stats"></div>
           <div class="result" id="resultPreview" style="max-height: 300px; overflow-y: auto;"></div>
         </div>
-        <div class="modal-body" style="padding-top: 0;">
-          <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 15px; cursor: pointer;">
-            <input type="checkbox" id="autoExportCSV" style="width: 18px; height: 18px; cursor: pointer;">
-            <span style="font-size: 13px;">Tự động export CSV sau khi scrape xong (tự động chia file nếu >200 items)</span>
-          </label>
-        </div>
         <div class="modal-footer" style="display: flex; gap: 10px; flex-wrap: wrap;">
           <button class="btn btn-success" id="exportJSON" style="flex: 1; min-width: 120px;">
             💾 Export JSON
@@ -79,6 +73,77 @@
           <button class="btn btn-secondary" id="clearResults" style="flex: 1; min-width: 120px;">
             🗑️ Xóa kết quả
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Format Selection Modal -->
+    <div class="modal-overlay" id="exportFormatModal" style="display: none;">
+      <div class="modal" style="max-width: 400px;">
+        <div class="modal-header">
+          <span>💾</span>
+          <h3>Chọn định dạng export</h3>
+        </div>
+        <div class="modal-body">
+          <p style="margin-bottom: 15px;">Vui lòng chọn định dạng file bạn muốn export:</p>
+          <div class="modal-options">
+            <div class="modal-option" data-format="csv" style="cursor: pointer;">
+              <div class="modal-option-icon">📄</div>
+              <div class="modal-option-content">
+                <div class="modal-option-title">CSV (Mặc định)</div>
+                <div class="modal-option-desc">Định dạng bảng tính, dễ mở bằng Excel</div>
+              </div>
+              <div class="modal-option-check">✓</div>
+            </div>
+            <div class="modal-option" data-format="json" style="cursor: pointer;">
+              <div class="modal-option-icon">💾</div>
+              <div class="modal-option-content">
+                <div class="modal-option-title">JSON</div>
+                <div class="modal-option-desc">Định dạng dữ liệu có cấu trúc, dễ xử lý</div>
+              </div>
+              <div class="modal-option-check">✓</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-btn modal-btn-cancel" id="cancelExportFormat">Hủy</button>
+          <button class="modal-btn modal-btn-confirm" id="confirmExportFormat">Export</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Loading Modal -->
+    <div class="modal-overlay" id="exportLoadingModal" style="display: none;">
+      <div class="modal" style="max-width: 400px;">
+        <div class="modal-header">
+          <span>⏳</span>
+          <h3>Đang export dữ liệu</h3>
+        </div>
+        <div class="modal-body">
+          <div id="exportLoadingInfo" style="line-height: 1.8; text-align: center;">
+            <div style="margin-bottom: 15px;">
+              <div class="spinner" style="display: inline-block; width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            </div>
+            <div id="exportLoadingText">Đang chuẩn bị export...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Complete Modal -->
+    <div class="modal-overlay" id="exportCompleteModal" style="display: none;">
+      <div class="modal" style="max-width: 500px;">
+        <div class="modal-header">
+          <span>✅</span>
+          <h3>Export hoàn tất</h3>
+        </div>
+        <div class="modal-body">
+          <div id="exportCompleteInfo" style="line-height: 1.8;">
+            <!-- Will be filled dynamically -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-btn modal-btn-confirm" id="closeExportComplete">Đóng</button>
         </div>
       </div>
     </div>
@@ -165,6 +230,12 @@
         <div class="input-group">
           <label>Số lượng sản phẩm cần scrape:</label>
           <input type="number" id="maxProducts" value="100" min="1" max="1000">
+        </div>
+        <div class="input-group" style="margin-top: 10px;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="autoExportCSV" style="width: 18px; height: 18px; cursor: pointer;">
+            <span style="font-size: 13px;">Tự động export sau khi scrape xong (tự động chia file nếu >100 items)</span>
+          </label>
         </div>
         <div class="input-group">
           <label>Container (để trống để tự động tìm):</label>
@@ -259,6 +330,7 @@
   <script src="ui/popup-state.js"></script>
   <script src="ui/popup-display.js"></script>
   <script src="ui/popup-scrape.js"></script>
+  <script src="core/scrape-workflow.js"></script>
   <script src="handlers/export-handler.js"></script>
   <script src="handlers/generic-handlers.js"></script>
   <script src="handlers/ecommerce-handlers.js"></script>

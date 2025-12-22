@@ -931,7 +931,9 @@
         details: [],
         maxDetails: maxDetails, // Store maxDetails limit
         forceAPI: options.forceAPI || false, // Store forceAPI option
-        startedAt: Date.now()
+        startedAt: Date.now(),
+        failedLinks: [],
+        attempts: {}
       };
       
       // Create progress indicator
@@ -1191,6 +1193,32 @@
         
         // Wait for page ready
         const scrapeAndContinue = async () => {
+          const link = state.links[state.currentIndex];
+
+          const markFailure = (reason) => {
+            const attempts = (state.attempts[link] || 0) + 1;
+            state.attempts[link] = attempts;
+
+            if (attempts >= 3) {
+              state.failedLinks.push({
+                link,
+                reason: reason || 'unknown',
+                attempts
+              });
+              state.currentIndex++;
+            }
+
+            // Retry if attempts < 3
+            if (attempts < 3) {
+              chrome.storage.local.set({ scrapeDetailsState: state }, () => {
+                window.location.href = link;
+              });
+              return true; // indicate retry
+            }
+
+            return false; // no retry, move on
+          };
+
           try {
             // Check if forceAPI is set in state
             const forceAPI = state.forceAPI || false;
@@ -1199,19 +1227,41 @@
             state.details.push(detail);
               
               // Update progress after scrape
-              const newPercent = Math.round((state.details.length / total) * 100);
+              // Use total links, not effectiveLimit, to show accurate progress
+              const newPercent = Math.round((state.details.length / state.links.length) * 100);
               if (window.DataScraperProgressIndicator) {
                 window.DataScraperProgressIndicator.update(newPercent);
               }
+              
+              // NEW WORKFLOW: No auto-export during scraping
+              // Export will be triggered when user clicks popup again (with badge)
             } else {
+              // detail null/invalid
+              const retried = markFailure('empty_detail');
+              if (retried) return;
             }
           } catch (error) {
+            const retried = markFailure(error?.message || 'error');
+            if (retried) return;
           }
           
           state.currentIndex++;
           
           // Check if we've reached maxDetails limit or end of links
-          if (state.currentIndex >= state.links.length || state.details.length >= (state.maxDetails || state.links.length)) {
+          // Use Math.min to ensure we don't exceed available links
+          const effectiveLimit = Math.min(
+            state.maxDetails || state.links.length,
+            state.links.length
+          );
+          
+          // Check completion: 
+          // Ưu tiên xử lý hết tất cả links trước, không dừng sớm vì limit
+          // Vì có thể có items bị skip do lỗi, nên cần thử scrape tất cả links
+          const hasProcessedAllLinks = state.currentIndex >= state.links.length;
+          
+          // Chỉ check limit nếu đã xử lý hết links HOẶC đã scrape đủ limit
+          // Nhưng ưu tiên xử lý hết links để không miss items
+          if (hasProcessedAllLinks) {
             chrome.storage.local.remove(['scrapeDetailsState']);
             
             // Show completion indicator
@@ -1223,6 +1273,7 @@
             chrome.storage.local.set({
               'scraper_detail_data': {
                 data: state.details,
+                failedLinks: state.failedLinks || [],
                 timestamp: Date.now(),
                 count: state.details.length,
                 type: 'detail',
@@ -1231,11 +1282,21 @@
             }, () => {
             });
             
+            // Show badge notification to notify user to click popup for download
+            chrome.runtime.sendMessage({
+              action: 'showScrapeCompleteBadge',
+              itemCount: state.details.length,
+              type: 'detail'
+            }, () => {
+              // Ignore errors
+            });
+            
             // Send result to popup with retry mechanism
             const sendResult = (retryCount = 0) => {
             chrome.runtime.sendMessage({
               action: 'detailsScrapingComplete',
               data: state.details,
+              failedLinks: state.failedLinks || [],
                 maxProducts: state.maxDetails || state.details.length,
               timestamp: new Date().toISOString()
               }, (response) => {
@@ -1262,9 +1323,8 @@
           
           if (nextLink) {
             chrome.storage.local.set({ scrapeDetailsState: state }, () => {
-              setTimeout(() => {
-                window.location.href = nextLink;
-              }, 1500);
+              // Navigate to next product - page load sẽ được handle bởi window.onload listener
+              window.location.href = nextLink;
             });
           } else {
             chrome.storage.local.remove(['scrapeDetailsState']);
@@ -1273,6 +1333,7 @@
             chrome.storage.local.set({
               'scraper_detail_data': {
                 data: state.details,
+                failedLinks: state.failedLinks || [],
                 timestamp: Date.now(),
                 count: state.details.length,
                 type: 'detail',
@@ -1284,6 +1345,7 @@
             chrome.runtime.sendMessage({
               action: 'detailsScrapingComplete',
               data: state.details,
+              failedLinks: state.failedLinks || [],
               maxProducts: state.maxDetails || state.details.length,
               timestamp: new Date().toISOString()
             }, (response) => {
@@ -1293,13 +1355,28 @@
           }
         };
         
-        if (document.readyState === 'complete') {
-          setTimeout(scrapeAndContinue, 2500);
-        } else {
-          window.addEventListener('load', () => {
-            setTimeout(scrapeAndContinue, 2500);
-          });
-        }
+        // Helper function để chờ page load hoàn tất
+        const waitForPageLoad = (callback) => {
+          // Nếu page đã load xong, chờ thêm một chút để đảm bảo DOM đã render
+          if (document.readyState === 'complete') {
+            // Chờ thêm một chút để đảm bảo dynamic content đã load
+            const checkInterval = setInterval(() => {
+              // Check nếu có các element quan trọng đã xuất hiện (tùy chọn)
+              // Hoặc đơn giản chỉ cần chờ một khoảng thời gian ngắn sau khi readyState === 'complete'
+              clearInterval(checkInterval);
+              callback();
+            }, 500); // Chờ 500ms sau khi readyState === 'complete'
+          } else {
+            // Chờ window.onload event
+            window.addEventListener('load', () => {
+              // Sau khi load, chờ thêm một chút để đảm bảo dynamic content đã render
+              setTimeout(callback, 500);
+            }, { once: true });
+          }
+        };
+        
+        // Chờ page load hoàn tất trước khi scrape
+        waitForPageLoad(scrapeAndContinue);
       }
     }
   });
@@ -1313,7 +1390,6 @@
     const currentUrl = window.location.href;
     const lastUrl = result.scraper_last_url;
     if (lastUrl && lastUrl !== currentUrl && result.paginationState) {
-      console.log('[Content] URL changed, clearing pagination state');
       chrome.storage.local.remove(['paginationState']);
       chrome.storage.local.set({ scraper_last_url: currentUrl });
       return;
@@ -1464,14 +1540,25 @@
         }
       };
 
-      // Wait for page ready
-      if (document.readyState === 'complete') {
-        setTimeout(continueScraping, 1000);
-      } else {
-        window.addEventListener('load', () => {
-          setTimeout(continueScraping, 1000);
-        });
-      }
+      // Helper function để chờ page load hoàn tất
+      const waitForPageLoad = (callback) => {
+        if (document.readyState === 'complete') {
+          // Chờ thêm một chút để đảm bảo dynamic content đã load
+          const checkInterval = setInterval(() => {
+            clearInterval(checkInterval);
+            callback();
+          }, 500); // Chờ 500ms sau khi readyState === 'complete'
+        } else {
+          // Chờ window.onload event
+          window.addEventListener('load', () => {
+            // Sau khi load, chờ thêm một chút để đảm bảo dynamic content đã render
+            setTimeout(callback, 500);
+          }, { once: true });
+        }
+      };
+      
+      // Chờ page load hoàn tất trước khi scrape
+      waitForPageLoad(continueScraping);
     }
     
     // Save current URL for state management

@@ -393,8 +393,49 @@
               return;
             }
             
+            // Check if button still exists and has text indicating more products
+            // For Long Châu: button text like "Xem thêm 188 sản phẩm" means there are more
+            let hasMoreProducts = true;
+            if (useLoadMore) {
+              const DOMUtils = window.DataScraperDOMUtils;
+              const parentContainer = DOMUtils.findParentContainer(container);
+              const checkButton = SelectorUtils.findLoadMoreButton(loadMoreSelector, parentContainer);
+              
+              if (checkButton) {
+                const btnText = DOMUtils.getText(checkButton).toLowerCase().trim();
+                // If button text doesn't contain "xem thêm" or number, might be done
+                // But also check if button is disabled (means no more products)
+                if (checkButton.disabled || (!/xem\s+thêm/i.test(btnText) && !/\d+/.test(btnText))) {
+                  hasMoreProducts = false;
+                }
+              } else {
+                // No button found, might be done
+                hasMoreProducts = false;
+              }
+            }
+            
             // If no new products extracted in this round, check if we should stop
             if (pageProducts === 0) {
+              // Check if we've tried multiple times with no new products
+              if (!hasMoreProducts) {
+                // No button or button disabled = no more products
+                const finalProducts = Array.from(products.values()).slice(0, maxProducts);
+                log(`⏹️ Đã load hết sản phẩm. Hoàn thành: ${finalProducts.length} sản phẩm`, '⏹️');
+                
+                if (options.requestId) {
+                  chrome.runtime.sendMessage({
+                    action: 'scrollComplete',
+                    requestId: options.requestId,
+                    data: finalProducts,
+                    url: window.location.href,
+                    timestamp: new Date().toISOString()
+                  });
+                }
+                
+                resolve(finalProducts);
+                return;
+              }
+              
               // If we have some products but less than requested, return what we have
               if (currentCount > 0) {
                 const finalProducts = Array.from(products.values()).slice(0, maxProducts);
@@ -475,11 +516,10 @@
               const timeSinceLastClick = Date.now() - lastClickTime;
               const shouldResetLastButton = timeSinceLastClick > 5000; // Reset after 5 seconds
 
-              // Verify button is visible and not the same as last clicked button
-              // Also check if it's a new button instance (different text) or enough time has passed
+              // Verify button is visible and clickable
+              // Simplified conditions: only check if button exists, is visible, and not disabled
               if (loadMoreButton && 
                   loadMoreButton.offsetParent !== null && 
-                  (isNewButton || shouldResetLastButton || loadMoreButton !== lastClickedButton) &&
                   !loadMoreButton.disabled) {
                 try {
                   // Mark as waiting to prevent concurrent clicks
@@ -488,12 +528,19 @@
                   lastClickedButtonText = buttonText;
                   lastClickTime = Date.now();
                   
-                  // Simple scroll and click like old version
+                  // Scroll button into view with more aggressive approach
                   loadMoreButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  
+                  // Also try scrolling window to ensure button is visible
+                  const rect = loadMoreButton.getBoundingClientRect();
+                  const scrollY = window.scrollY + rect.top - (window.innerHeight / 2);
+                  window.scrollTo({ top: scrollY, behavior: 'smooth' });
 
+                  // Wait longer to ensure button is ready (especially for Long Châu)
                   setTimeout(() => {
-                    // Double-check button is still valid before clicking
-                    if (!loadMoreButton.offsetParent || loadMoreButton.disabled) {
+                    // Re-find button in case DOM changed
+                    const currentButton = SelectorUtils.findLoadMoreButton(loadMoreSelector, parentContainer);
+                    if (!currentButton || !currentButton.offsetParent || currentButton.disabled) {
                       isWaitingForContent = false;
                       lastClickedButton = null;
                       lastClickedButtonText = null;
@@ -502,48 +549,87 @@
                       return;
                     }
                     
-                    // Simple click and wait like old version
+                    // Try multiple click methods to ensure it works
+                    let clickSuccess = false;
+                    
+                    // Method 1: Direct click()
                     try {
-                      loadMoreButton.click();
+                      currentButton.focus(); // Focus first
+                      currentButton.click();
+                      clickSuccess = true;
+                    } catch (e) {
+                      log(`Click method 1 failed: ${e.message}`, '⚠️');
+                    }
+                    
+                    // Method 2: Dispatch mouse events (fallback)
+                    if (!clickSuccess) {
+                      try {
+                        currentButton.focus();
+                        const mouseDownEvent = new MouseEvent('mousedown', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window
+                        });
+                        const mouseUpEvent = new MouseEvent('mouseup', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window
+                        });
+                        const clickEvent = new MouseEvent('click', {
+                          bubbles: true,
+                          cancelable: true,
+                          view: window
+                        });
+                        
+                        currentButton.dispatchEvent(mouseDownEvent);
+                        currentButton.dispatchEvent(mouseUpEvent);
+                        currentButton.dispatchEvent(clickEvent);
+                        clickSuccess = true;
+                      } catch (e) {
+                        log(`Click method 2 failed: ${e.message}`, '⚠️');
+                      }
+                    }
+                    
+                    if (clickSuccess) {
                       loadMoreClickCount++;
-                      log(`Đã click nút "Xem thêm" (lần ${loadMoreClickCount})`, '🔄');
+                      log(`✅ Đã click nút "Xem thêm" (lần ${loadMoreClickCount}) - Text: "${buttonText}"`, '🔄');
                       
-                      // Simple wait like old version - just wait scrollDelay then continue
+                      // Wait longer for content to load (especially for Long Châu)
+                      const waitTime = scrollDelay + 500; // Extra 500ms for Long Châu
                       setTimeout(() => {
                         isWaitingForContent = false;
                         lastClickedButton = null;
                         lastClickedButtonText = null;
                         lastClickTime = 0;
                         scrapeCurrentProducts();
-                      }, scrollDelay);
-                    } catch (e) {
-                      log(`Lỗi khi click "Xem thêm": ${e.message}`, '⚠️');
+                      }, waitTime);
+                    } else {
+                      log(`❌ Không thể click nút "Xem thêm"`, '⚠️');
                       isWaitingForContent = false;
                       lastClickedButton = null;
                       lastClickedButtonText = null;
                       lastClickTime = 0;
                       scrapeCurrentProducts();
-                      return;
                     }
-                  }, 500);
+                  }, 800); // Increased delay to 800ms for better reliability
                   return;
                 } catch (e) {
                   isWaitingForContent = false;
                   lastClickedButton = null;
                   lastClickedButtonText = null;
                   lastClickTime = 0;
-                  log(`Lỗi khi click "Xem thêm": ${e.message}`, '⚠️');
+                  log(`Lỗi khi xử lý click "Xem thêm": ${e.message}`, '⚠️');
                 }
-              } else if (loadMoreButton && !isNewButton && !shouldResetLastButton && loadMoreButton === lastClickedButton) {
-                // Button was already clicked recently, wait a bit more
-                log(`Đang chờ nội dung từ lần click trước... (${Math.round(timeSinceLastClick/1000)}s ago)`, '⏳');
+              } else if (loadMoreButton && loadMoreButton.disabled) {
+                // Button is disabled, might be loading - wait a bit
+                log(`Nút "Xem thêm" đang disabled (có thể đang load)...`, '⏳');
                 setTimeout(() => {
                   scrapeCurrentProducts();
                 }, scrollDelay);
                 return;
-              } else if (loadMoreButton && loadMoreButton.disabled) {
-                // Button is disabled, might be loading - wait a bit
-                log(`Nút "Xem thêm" đang disabled (có thể đang load)...`, '⏳');
+              } else if (loadMoreButton && loadMoreButton.offsetParent === null) {
+                // Button is hidden, might appear later
+                log(`Nút "Xem thêm" đang ẩn, đợi thêm...`, '⏳');
                 setTimeout(() => {
                   scrapeCurrentProducts();
                 }, scrollDelay);

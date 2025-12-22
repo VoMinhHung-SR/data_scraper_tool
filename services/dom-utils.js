@@ -94,8 +94,16 @@
      * Remove: all emoji, icons, symbols (except allowed ones)
      * @param {string} text - Text to clean
      * @returns {string}
+     * 
+     * COMMENTED OUT: Logic này quá phức tạp và gây lỗi, đơn giản hóa bằng cách return text gốc
      */
     removeEmojiAndIcons: (text) => {
+      // COMMENTED: Logic lọc ký tự đặc biệt đã bị comment vì quá phức tạp và gây lỗi
+      // Chỉ return text gốc sau khi trim
+      if (!text) return '';
+      return text.trim();
+      
+      /* ORIGINAL COMPLEX LOGIC - COMMENTED OUT
       if (!text) return '';
       
       let cleaned = '';
@@ -155,23 +163,24 @@
       cleaned = cleaned.replace(/\s+/g, ' ').trim();
       
       return cleaned;
+      */
     },
 
     /**
      * Extract text content safely (with emoji/icon removal)
      * @param {Element} element - DOM element
      * @param {number|null} maxLength - Maximum length to return
-     * @param {boolean} removeEmoji - Whether to remove emoji/icons (default: true)
+     * @param {boolean} removeEmoji - Whether to remove emoji/icons (default: false - DISABLED)
      * @returns {string}
      */
-    getText: (element, maxLength = null, removeEmoji = true) => {
+    getText: (element, maxLength = null, removeEmoji = false) => {
       if (!element) return '';
       let text = element.textContent?.trim() || '';
       
-      // Remove emoji and icons if requested
-      if (removeEmoji) {
-        text = window.DataScraperDOMUtils.removeEmojiAndIcons(text);
-      }
+      // COMMENTED: Remove emoji and icons if requested - DISABLED vì logic quá phức tạp
+      // if (removeEmoji) {
+      //   text = window.DataScraperDOMUtils.removeEmojiAndIcons(text);
+      // }
       
       return maxLength ? text.substring(0, maxLength) : text;
     },

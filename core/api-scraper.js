@@ -343,6 +343,61 @@
       const link = slug ? `https://nhathuoclongchau.com.vn/${slug}` : '';
       const url = link || window.location.href;
 
+      // Extract package options from API prices array
+      const packageOptions = [];
+      if (Array.isArray(product.prices) && product.prices.length > 0) {
+        product.prices.forEach((priceObj, index) => {
+          const unitName = priceObj.measureUnitName || priceObj.unit || '';
+          const unitCode = unitName.toLowerCase()
+            .replace(/[^a-z0-9]/g, '')
+            .replace(/^(hop|hoop)$/i, 'hop')
+            .replace(/^(vi|vỉ)$/i, 'vi')
+            .replace(/^(vien|viên)$/i, 'vien')
+            .replace(/^(goi|gói)$/i, 'goi')
+            .replace(/^(chai)$/i, 'chai')
+            .replace(/^(tuyp|tuýp)$/i, 'tuyp')
+            || `option${index}`;
+          
+          const priceVal = priceObj.price || priceObj.value || 0;
+          const currency = priceObj.currencySymbol || '₫';
+          const priceStr = `${priceVal.toLocaleString('vi-VN')}${currency}`;
+          const priceDisplayStr = `${priceStr}${unitName ? ' / ' + unitName : ''}`;
+          
+          packageOptions.push({
+            unit: unitCode,
+            unitDisplay: unitName || '',
+            price: priceStr,
+            priceDisplay: priceDisplayStr,
+            priceValue: priceVal,
+            specification: packageSize || '',
+            isDefault: index === 0,
+            isAvailable: true,
+            conversion: null
+          });
+        });
+      } else if (priceObj && typeof priceObj === 'object') {
+        // Single price object - convert to packageOptions
+        const unitName = priceObj.measureUnitName || priceObj.unit || packageSize || '';
+        const unitCode = unitName.toLowerCase()
+          .replace(/[^a-z0-9]/g, '')
+          .replace(/^(hop|hoop)$/i, 'hop')
+          .replace(/^(vi|vỉ)$/i, 'vi')
+          .replace(/^(vien|viên)$/i, 'vien')
+          || 'default';
+        
+        packageOptions.push({
+          unit: unitCode,
+          unitDisplay: unitName || '',
+          price: priceDisplay || '',
+          priceDisplay: priceDisplay || '',
+          priceValue: priceValue || 0,
+          specification: packageSize || '',
+          isDefault: true,
+          isAvailable: true,
+          conversion: null
+        });
+      }
+
       const flatProduct = {
         name: product.name || product.webName || '',
         sku: product.sku || '',
@@ -378,6 +433,7 @@
         prices: Array.isArray(product.prices) ? product.prices : [],
         priceObj: priceObj || null,
         priceValue: priceValue || 0,
+        packageOptions: packageOptions,
         productRanking: product.productRanking || 0,
         displayCode: product.displayCode || 1,
         isPublish: product.isPublish !== undefined ? product.isPublish : true

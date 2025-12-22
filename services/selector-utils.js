@@ -110,6 +110,10 @@
     findLoadMoreButton: (customSelector = null, container = null) => {
       const DOMUtils = window.DataScraperDOMUtils;
       
+      // Check if we're on Long Châu website
+      const isLongChau = window.location.hostname.includes('nhathuoclongchau.com.vn') || 
+                         window.location.hostname.includes('longchau.com.vn');
+      
       // Search in both container and document to ensure we find button even if outside container
       // This is important because button might be in a sibling element or parent
       const searchContexts = container ? [container, document] : [document];
@@ -127,6 +131,37 @@
             }
           } catch (e) {
             // Continue to next search context
+          }
+        }
+      }
+
+      // Priority 0.5: Hardcode selector for Long Châu (specific optimization)
+      if (isLongChau) {
+        // Long Châu specific selectors (hardcoded for reliability)
+        const longChauSelectors = [
+          'button.mt-3.flex.w-full.items-center.justify-center.p-\\[10px\\]', // Exact match
+          'button.mt-3.flex.w-full', // Partial match
+          'button.mt-3[class*="flex"][class*="w-full"]', // Flexible match
+          'button.mt-3', // Fallback to simple
+        ];
+        
+        for (const sel of longChauSelectors) {
+          for (const searchContext of searchContexts) {
+            try {
+              const buttons = DOMUtils.safeQueryAll(sel, searchContext);
+              for (const btn of buttons) {
+                if (container && !container.contains(btn) && searchContext === container) continue;
+                if (!btn.offsetParent) continue;
+                
+                const text = DOMUtils.getText(btn).toLowerCase().trim();
+                // Match "Xem thêm" or "Xem thêm X sản phẩm"
+                if (/xem\s+thêm/i.test(text)) {
+                  return btn;
+                }
+              }
+            } catch (e) {
+              continue;
+            }
           }
         }
       }

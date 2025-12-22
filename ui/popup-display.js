@@ -11,19 +11,11 @@
      * @param {Object} options - Options { maxProducts: number }
      */
     displayResults: function(data, options = {}) {
-      console.log('[PopupDisplay] displayResults called:', {
-        dataType: Array.isArray(data) ? 'array' : typeof data,
-        dataLength: Array.isArray(data) ? data.length : 1,
-        options: options
-      });
-      
       if (!data) {
-        console.warn('[PopupDisplay] displayResults: No data provided');
         return;
       }
       
       if (Array.isArray(data) && data.length === 0) {
-        console.warn('[PopupDisplay] displayResults: Empty array provided');
         return;
       }
       
@@ -44,8 +36,6 @@
         console.error('[PopupDisplay] displayResults: previewDiv not found');
         return;
       }
-      
-      console.log('[PopupDisplay] All elements found, displaying modal...');
 
       // Show modal with multiple fallbacks
       resultsModal.style.display = 'flex';
@@ -178,7 +168,6 @@
           if (chrome.runtime.lastError.message.includes('Receiving end does not exist')) {
             return;
           }
-          console.warn('Load page info error:', chrome.runtime.lastError.message);
           return;
         }
         if (response) {

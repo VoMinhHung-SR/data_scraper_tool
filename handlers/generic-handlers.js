@@ -6,13 +6,21 @@
   // ============================================
   window.DataScraperGenericHandlers = {
     /**
+     * Helper: Validate tab access
+     */
+    _validateTab: function(tab) {
+      if (!tab || !tab.id) {
+        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
+        return false;
+      }
+      return true;
+    },
+
+    /**
      * Handle auto-detect selector
      */
     handleAutoDetect: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
       
       chrome.tabs.sendMessage(tab.id, { action: 'autoDetectSelector' }, (response) => {
         if (chrome.runtime.lastError) {
@@ -48,10 +56,7 @@
      * Handle test selector
      */
     handleTestSelector: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
       
       const selectorInput = document.getElementById('productSelector');
       const selector = selectorInput?.value.trim();
@@ -98,10 +103,7 @@
      * Handle custom scrape
      */
     handleCustomScrape: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
 
       const selectorInput = document.getElementById('customSelector');
       const attributeInput = document.getElementById('customAttribute');
@@ -121,10 +123,7 @@
      * Handle highlight
      */
     handleHighlight: function(tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
 
       const selectorInput = document.getElementById('customSelector');
       const selector = selectorInput?.value.trim();
@@ -154,10 +153,7 @@
      * Handle quick scrape (table, links, images, products - simple)
      */
     handleQuickScrape: function(type, tab) {
-      if (!tab || !tab.id) {
-        window.PopupDisplay.showMessage('Không thể truy cập tab', 'error');
-        return;
-      }
+      if (!this._validateTab(tab)) return;
 
       window.PopupScrape.scrape(type, {}, tab);
     }

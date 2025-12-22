@@ -151,10 +151,10 @@
         }
       }
 
-      // Final cleanup: remove any remaining emoji/icons
-      if (name) {
-        name = window.DataScraperDOMUtils.removeEmojiAndIcons(name);
-      }
+      // COMMENTED: Final cleanup: remove any remaining emoji/icons - DISABLED vì logic quá phức tạp
+      // if (name) {
+      //   name = window.DataScraperDOMUtils.removeEmojiAndIcons(name);
+      // }
 
       return name || '';
     },
@@ -206,10 +206,10 @@
         }
       }
 
-      // Clean up price: remove emoji/icons
-      if (price) {
-        price = window.DataScraperDOMUtils.removeEmojiAndIcons(price);
-      }
+      // COMMENTED: Clean up price: remove emoji/icons - DISABLED vì logic quá phức tạp
+      // if (price) {
+      //   price = window.DataScraperDOMUtils.removeEmojiAndIcons(price);
+      // }
 
       return price;
     },
@@ -271,10 +271,10 @@
         }
       }
 
-      // Clean up package info: remove emoji/icons
-      if (packageInfo) {
-        packageInfo = window.DataScraperDOMUtils.removeEmojiAndIcons(packageInfo);
-      }
+      // COMMENTED: Clean up package info: remove emoji/icons - DISABLED vì logic quá phức tạp
+      // if (packageInfo) {
+      //   packageInfo = window.DataScraperDOMUtils.removeEmojiAndIcons(packageInfo);
+      // }
 
       return packageInfo;
     },
@@ -409,11 +409,11 @@
         }
       }
       
-      // Clean up SKU: remove emoji/icons
+      // COMMENTED: Clean up SKU: remove emoji/icons - DISABLED vì logic quá phức tạp
       sku = sku.trim();
-      if (sku) {
-        sku = window.DataScraperDOMUtils.removeEmojiAndIcons(sku);
-      }
+      // if (sku) {
+      //   sku = window.DataScraperDOMUtils.removeEmojiAndIcons(sku);
+      // }
       
       return sku;
     },
@@ -446,10 +446,10 @@
         }
       }
       
-      // Clean up brand: remove emoji/icons
-      if (brand) {
-        brand = window.DataScraperDOMUtils.removeEmojiAndIcons(brand);
-      }
+      // COMMENTED: Clean up brand: remove emoji/icons - DISABLED vì logic quá phức tạp
+      // if (brand) {
+      //   brand = window.DataScraperDOMUtils.removeEmojiAndIcons(brand);
+      // }
       
       return brand;
     },
@@ -470,9 +470,9 @@
           let key = DOMUtils.getText(cells[0]).trim().replace(/[:\s]+$/, '');
           let value = DOMUtils.getText(cells[1]).trim();
           
-          // Remove emoji/icons from key and value
-          key = window.DataScraperDOMUtils.removeEmojiAndIcons(key);
-          value = window.DataScraperDOMUtils.removeEmojiAndIcons(value);
+          // COMMENTED: Remove emoji/icons from key and value - DISABLED vì logic quá phức tạp
+          // key = window.DataScraperDOMUtils.removeEmojiAndIcons(key);
+          // value = window.DataScraperDOMUtils.removeEmojiAndIcons(value);
           
           if (key && value && key !== value && !key.includes('Chọn')) {
             specifications[key] = value;
@@ -485,9 +485,9 @@
         let label = DOMUtils.getText(DOMUtils.safeQuery('[class*="label"], [class*="title"]', item));
         let value = DOMUtils.getText(DOMUtils.safeQuery('[class*="value"], [class*="content"]', item));
         
-        // Remove emoji/icons from label and value
-        label = window.DataScraperDOMUtils.removeEmojiAndIcons(label);
-        value = window.DataScraperDOMUtils.removeEmojiAndIcons(value);
+        // COMMENTED: Remove emoji/icons from label and value - DISABLED vì logic quá phức tạp
+        // label = window.DataScraperDOMUtils.removeEmojiAndIcons(label);
+        // value = window.DataScraperDOMUtils.removeEmojiAndIcons(value);
         
         if (label && value && !label.includes('Chọn')) {
           specifications[label] = value;
@@ -505,9 +505,10 @@
     cleanSectionText: (text) => {
       if (!text) return '';
       
-      // First remove emoji/icons
+      // COMMENTED: First remove emoji/icons - DISABLED vì logic quá phức tạp
       const DOMUtils = window.DataScraperDOMUtils;
-      let cleaned = DOMUtils.removeEmojiAndIcons(text);
+      // let cleaned = DOMUtils.removeEmojiAndIcons(text);
+      let cleaned = text.trim(); // Simple trim instead
       
       return cleaned
         .split('\n')

@@ -7,6 +7,7 @@
   window.PopupState = {
     currentListData: null,
     currentDetailData: null,
+    currentFailedLinks: [],
     currentTab: null,
     messageTimeout: null,
     STORAGE_KEY_LIST: 'scraper_list_data',
@@ -67,6 +68,7 @@
       // Clear in-memory state
       this.currentListData = null;
       this.currentDetailData = null;
+      this.currentFailedLinks = [];
       
       // Collect ALL scraper-related keys to remove
       // NOTE: scraper_last_url is NOT cleared - it's used to detect URL changes
@@ -80,6 +82,10 @@
         'paginationState',
         // API cache
         'lastProductDetailAPI',
+        // Export related keys
+        'currentExportBatch',
+        'exportCompleted',
+        'pendingAutoExport',
         // DataScraperStateManager keys
         window.DataScraperStateManager?.KEYS?.PAGINATION,
         window.DataScraperStateManager?.KEYS?.DETAIL_LIST,
@@ -89,21 +95,15 @@
         'scraper_list_data'
       ].filter(Boolean);
       
-      console.log('[PopupState] Clearing all states, keys to remove:', keysToRemove);
-      
       // Clear all keys in one operation to avoid race conditions
       chrome.storage.local.remove(keysToRemove, () => {
         if (chrome.runtime.lastError) {
           console.error('[PopupState] Error clearing states:', chrome.runtime.lastError);
-        } else {
-          console.log('[PopupState] Successfully cleared all states');
         }
         
         // Double-check: Also call DataScraperStateManager.clearAll to ensure nothing is missed
         if (window.DataScraperStateManager && window.DataScraperStateManager.clearAll) {
-          window.DataScraperStateManager.clearAll().then(() => {
-            console.log('[PopupState] DataScraperStateManager.clearAll completed');
-          }).catch(err => {
+          window.DataScraperStateManager.clearAll().catch(err => {
             console.error('[PopupState] Error in DataScraperStateManager.clearAll:', err);
           });
         }
@@ -124,6 +124,14 @@
     setDetailData: function(data) {
       this.currentDetailData = data;
       this.saveDetailData(data);
+    },
+
+    setFailedLinks: function(failedLinks) {
+      this.currentFailedLinks = Array.isArray(failedLinks) ? failedLinks : [];
+    },
+
+    getFailedLinks: function() {
+      return this.currentFailedLinks || [];
     },
 
     /**
@@ -264,7 +272,6 @@
 
         if (keysToRemove.length > 0) {
           chrome.storage.local.remove(keysToRemove, () => {
-            console.log('[PopupState] Cleaned up old data:', keysToRemove);
             if (callback) callback();
           });
         } else {
@@ -279,18 +286,12 @@
     loadSavedData: async function() {
       return new Promise((resolve) => {
         chrome.storage.local.get([this.STORAGE_KEY_LIST, this.STORAGE_KEY_DETAIL], (result) => {
-          console.log('[PopupState] Loading saved data from storage:', {
-            hasList: !!result[this.STORAGE_KEY_LIST],
-            hasDetail: !!result[this.STORAGE_KEY_DETAIL]
-          });
-          
           // Load list data
           if (result[this.STORAGE_KEY_LIST] && result[this.STORAGE_KEY_LIST].data) {
             const saved = result[this.STORAGE_KEY_LIST];
             const age = Date.now() - saved.timestamp;
             if (age < 24 * 60 * 60 * 1000) {
               this.currentListData = saved.data;
-              console.log('[PopupState] Loaded list data:', saved.data.length, 'items');
             } else {
               chrome.storage.local.remove([this.STORAGE_KEY_LIST]);
             }
@@ -302,7 +303,6 @@
             const age = Date.now() - saved.timestamp;
             if (age < 24 * 60 * 60 * 1000) {
               this.currentDetailData = saved.data;
-              console.log('[PopupState] Loaded detail data:', saved.data.length, 'items');
             } else {
               chrome.storage.local.remove([this.STORAGE_KEY_DETAIL]);
             }

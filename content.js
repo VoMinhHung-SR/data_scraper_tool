@@ -931,7 +931,9 @@
         details: [],
         maxDetails: maxDetails, // Store maxDetails limit
         forceAPI: options.forceAPI || false, // Store forceAPI option
-        startedAt: Date.now()
+        startedAt: Date.now(),
+        failedLinks: [],
+        attempts: {}
       };
       
       // Create progress indicator
@@ -1191,6 +1193,32 @@
         
         // Wait for page ready
         const scrapeAndContinue = async () => {
+          const link = state.links[state.currentIndex];
+
+          const markFailure = (reason) => {
+            const attempts = (state.attempts[link] || 0) + 1;
+            state.attempts[link] = attempts;
+
+            if (attempts >= 3) {
+              state.failedLinks.push({
+                link,
+                reason: reason || 'unknown',
+                attempts
+              });
+              state.currentIndex++;
+            }
+
+            // Retry if attempts < 3
+            if (attempts < 3) {
+              chrome.storage.local.set({ scrapeDetailsState: state }, () => {
+                window.location.href = link;
+              });
+              return true; // indicate retry
+            }
+
+            return false; // no retry, move on
+          };
+
           try {
             // Check if forceAPI is set in state
             const forceAPI = state.forceAPI || false;
@@ -1208,8 +1236,13 @@
               // NEW WORKFLOW: No auto-export during scraping
               // Export will be triggered when user clicks popup again (with badge)
             } else {
+              // detail null/invalid
+              const retried = markFailure('empty_detail');
+              if (retried) return;
             }
           } catch (error) {
+            const retried = markFailure(error?.message || 'error');
+            if (retried) return;
           }
           
           state.currentIndex++;
@@ -1240,6 +1273,7 @@
             chrome.storage.local.set({
               'scraper_detail_data': {
                 data: state.details,
+                failedLinks: state.failedLinks || [],
                 timestamp: Date.now(),
                 count: state.details.length,
                 type: 'detail',
@@ -1262,6 +1296,7 @@
             chrome.runtime.sendMessage({
               action: 'detailsScrapingComplete',
               data: state.details,
+              failedLinks: state.failedLinks || [],
                 maxProducts: state.maxDetails || state.details.length,
               timestamp: new Date().toISOString()
               }, (response) => {
@@ -1298,6 +1333,7 @@
             chrome.storage.local.set({
               'scraper_detail_data': {
                 data: state.details,
+                failedLinks: state.failedLinks || [],
                 timestamp: Date.now(),
                 count: state.details.length,
                 type: 'detail',
@@ -1309,6 +1345,7 @@
             chrome.runtime.sendMessage({
               action: 'detailsScrapingComplete',
               data: state.details,
+              failedLinks: state.failedLinks || [],
               maxProducts: state.maxDetails || state.details.length,
               timestamp: new Date().toISOString()
             }, (response) => {

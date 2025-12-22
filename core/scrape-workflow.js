@@ -267,43 +267,33 @@
 
           const tab = tabs[0];
           
-          // Save state để content script có thể tiếp tục
-          chrome.storage.local.set({
-            scrapeDetailsState: {
-              links: productLinks,
-              currentIndex: 0,
-              details: [],
+          // Send message để bắt đầu scrape detail
+          // Content script sẽ tự lưu state và navigate
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'scrape',
+            type: 'productDetailsFromList',
+            options: {
+              productLinks: productLinks,
+              delay: 2000,
               maxDetails: productLinks.length,
               forceAPI: forceAPI
             }
-          }, () => {
-            // Send message để bắt đầu scrape detail
-            chrome.tabs.sendMessage(tab.id, {
-              action: 'scrape',
-              type: 'productDetailsFromList',
-              options: {
-                productLinks: productLinks,
-                delay: 2000,
-                maxDetails: productLinks.length,
-                forceAPI: forceAPI
-              }
-            }, (response) => {
-              if (chrome.runtime.lastError) {
-                chrome.runtime.onMessage.removeListener(detailsListener);
-                reject(new Error(chrome.runtime.lastError.message));
-                return;
-              }
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              chrome.runtime.onMessage.removeListener(detailsListener);
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
 
-              // Update progress
-              if (onProgress) {
-                onProgress({
-                  message: `Đã bắt đầu scrape chi tiết...`,
-                  progress: 0
-                });
-              }
+            // Update progress
+            if (onProgress) {
+              onProgress({
+                message: `Đã bắt đầu scrape chi tiết...`,
+                progress: 0
+              });
+            }
 
-              // Chi tiết sẽ được gửi qua detailsScrapingComplete message
-            });
+            // Chi tiết sẽ được gửi qua detailsScrapingComplete message
           });
         });
       });

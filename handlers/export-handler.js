@@ -1133,6 +1133,20 @@
       
       // Mark export as completed
       chrome.storage.local.set({ exportCompleted: true });
+      
+      // Clear badge tick xanh khi export hoàn thành
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs && tabs.length > 0 && tabs[0].id) {
+          chrome.runtime.sendMessage({
+            action: 'clearBadge',
+            tabId: tabs[0].id
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              console.warn('[ExportHandler] Error clearing badge:', chrome.runtime.lastError);
+            }
+          });
+        }
+      });
 
       const fileCount = files.length;
       
@@ -1159,23 +1173,33 @@
       
       // Clear batch info if exists
       chrome.storage.local.remove(['currentExportBatch']);
-      
-      infoDiv.innerHTML = `
-        <div style="margin-bottom: 15px;">
-          <strong>✅ Đã xuất thành công:</strong> ${fileCount} file${fileCount > 1 ? 's' : ''}
-          ${exportedRange ? ` (items ${exportedRange})` : ''}
-          ${totalItems ? ` / Tổng: ${totalItems} items` : ''}
-        </div>
-        <div style="margin-bottom: 15px;">
-          <strong>📁 Đường dẫn folder:</strong><br>
-          <span style="color: #666; font-size: 12px;">${downloadFolder}</span>
-        </div>
-      `;
-      
-      modal.style.display = 'flex';
-      
-      // Clear data after export
-      this._clearDataAfterExport();
+
+      // Load failed links (if any) to show in modal
+      chrome.storage.local.get(['scraper_detail_data'], (result) => {
+        const failedLinks = result?.scraper_detail_data?.failedLinks || [];
+        const failedCount = failedLinks.length;
+        const failedListHtml = failedCount
+          ? `<div style="margin-top: 10px; font-size: 12px; color: #c00;">❌ Sản phẩm lỗi: ${failedCount}<br>${failedLinks.slice(0,5).map(f => `• ${f.link || 'N/A'} (${f.reason || 'error'})`).join('<br>')}${failedCount>5?'...':''}</div>`
+          : '';
+        
+        infoDiv.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <strong>✅ Đã xuất thành công:</strong> ${fileCount} file${fileCount > 1 ? 's' : ''}
+            ${exportedRange ? ` (items ${exportedRange})` : ''}
+            ${totalItems ? ` / Tổng: ${totalItems} items` : ''}
+          </div>
+          <div style="margin-bottom: 15px;">
+            <strong>📁 Đường dẫn folder:</strong><br>
+            <span style="color: #666; font-size: 12px;">${downloadFolder}</span>
+          </div>
+          ${failedListHtml}
+        `;
+        
+        modal.style.display = 'flex';
+        
+        // Clear data after export
+        this._clearDataAfterExport();
+      });
     },
 
 

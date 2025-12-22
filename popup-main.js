@@ -37,6 +37,7 @@
         
         if (message.action === 'detailsScrapingComplete') {
           const details = message.data || [];
+          const failedLinks = message.failedLinks || [];
           
           if (!details || details.length === 0) {
             // Fallback: try to load from storage
@@ -60,6 +61,9 @@
           }
           
           window.PopupState.setDetailData(details);
+          if (failedLinks.length > 0 && window.PopupState.setFailedLinks) {
+            window.PopupState.setFailedLinks(failedLinks);
+          }
           
           // Force display results section with data
           if (details && details.length > 0) {
@@ -92,11 +96,13 @@
           
           // Chỉ hiện 1 line message ngắn gọn
           const maxProducts = message.maxProducts || details.length;
+          const failedCount = failedLinks.length || 0;
           const autoExportMsg = document.getElementById('autoExportCSV')?.checked 
             ? ' (đang tự động export...)' 
             : '';
           window.PopupDisplay.showMessage(
-            `✅ Đã scrape thành công ${details.length}/${maxProducts} sản phẩm${autoExportMsg}`, 
+            `✅ Đã scrape thành công ${details.length}/${maxProducts} sản phẩm${autoExportMsg}` +
+            (failedCount ? ` (❌ lỗi: ${failedCount})` : ''),
             'success'
           );
           
@@ -125,6 +131,15 @@
             // Check if export was already done (by checking if exportCompleteModal was shown)
             chrome.storage.local.get(['exportCompleted'], (exportCheck) => {
               if (exportCheck.exportCompleted) {
+                // Clear badge tick xanh khi export đã hoàn thành
+                chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                  if (tabs && tabs.length > 0 && tabs[0].id) {
+                    chrome.runtime.sendMessage({
+                      action: 'clearBadge',
+                      tabId: tabs[0].id
+                    });
+                  }
+                });
                 // Already exported, just show success message
                 window.PopupDisplay.displayResults(savedDetailData, { 
                   maxProducts: savedDetailData.length 

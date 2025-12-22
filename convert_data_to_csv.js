@@ -12,6 +12,7 @@ const MAX_DEPTH = 5;
 const MAX_STRING_LENGTH = 50000;
 const MAX_ROW_LENGTH = 1000000;
 const MAX_KEYS_PER_OBJECT = 1000;
+const ITEMS_PER_FILE = 100; // Split files if > 100 items
 
 /**
  * Normalize product data to unified format (adapted from export-handler.js)
@@ -289,6 +290,37 @@ function buildRow(headers, flattened, index) {
 }
 
 /**
+ * Convert chunk to CSV (for multiple files)
+ */
+function convertChunkToCSV(headers, chunk) {
+  if (!Array.isArray(chunk) || chunk.length === 0) return '';
+
+  const parts = [];
+  // Header row with BOM for Excel UTF-8 support
+  parts.push('\ufeff' + headers.map(h => `"${escapeCSV(h)}"`).join(','));
+
+  for (let i = 0; i < chunk.length; i++) {
+    try {
+      if (!chunk[i] || typeof chunk[i] !== 'object') {
+        parts.push(headers.map(() => '""').join(','));
+        continue;
+      }
+
+      const itemCopy = JSON.parse(JSON.stringify(chunk[i]));
+      const normalized = normalizeToAPIFormat(itemCopy);
+      const flattened = flattenItem(normalized);
+      const row = buildRow(headers, flattened, i);
+      parts.push(row);
+    } catch (error) {
+      console.warn(`Error processing item ${i}:`, error);
+      parts.push(headers.map(() => '""').join(','));
+    }
+  }
+
+  return parts.join('\n');
+}
+
+/**
  * Convert data to CSV
  */
 function convertToCSV(data) {
@@ -376,37 +408,224 @@ function extractCategorySlug(data) {
 }
 
 /**
+ * Normalize titleSlug to filename format
+ */
+function normalizeTitleSlug(titleSlug) {
+  if (!titleSlug) return '';
+  // Convert "thuoc/thuoc-tim-mach-and-mau" to "thuoc-thuoc-tim-mach-and-mau"
+  return titleSlug.replace(/\//g, '-');
+}
+
+/**
+ * Generate filename with titleSlug and index range
+ */
+function generateFilename(titleSlug, startIndex, endIndex, outputDir) {
+  const slug = normalizeTitleSlug(titleSlug);
+  const indexSuffix = `-${startIndex}-${endIndex}`;
+  const filename = slug 
+    ? `scraped-data-${slug}${indexSuffix}.csv`
+    : `scraped-data${indexSuffix}.csv`;
+  return path.join(outputDir, filename);
+}
+
+/**
+ * Export multiple CSV files (when > ITEMS_PER_FILE)
+ * @param {Array} data - Data array to export (already sliced with skip/limit if needed)
+ * @param {string} titleSlug - Title slug for filename
+ * @param {string} outputDir - Output directory
+ * @param {number} skipOffset - Offset to add to startIndex (for skip parameter, default: 0)
+ */
+function exportMultipleFiles(data, titleSlug, outputDir, skipOffset = 0) {
+  const totalFiles = Math.ceil(data.length / ITEMS_PER_FILE);
+  console.log(`📦 Splitting ${data.length} items into ${totalFiles} files...`);
+  
+  // Collect headers from first chunk
+  let headers;
+  try {
+    const firstChunk = data.slice(0, ITEMS_PER_FILE);
+    headers = collectHeaders(firstChunk);
+    if (!headers?.length) {
+      throw new Error('Không thể xác định headers');
+    }
+    console.log(`✅ Collected ${headers.length} headers`);
+  } catch (error) {
+    console.error('❌ Error collecting headers:', error);
+    throw error;
+  }
+  
+  const exportedFiles = [];
+  
+  for (let fileIndex = 0; fileIndex < totalFiles; fileIndex++) {
+    const start = fileIndex * ITEMS_PER_FILE;
+    const end = Math.min(start + ITEMS_PER_FILE, data.length);
+    const chunk = data.slice(start, end);
+    
+    // Calculate actual indices for filename (1-based, with skip offset)
+    const actualStartIndex = skipOffset + start + 1; // Start from 1, not 0, add skip offset
+    const actualEndIndex = skipOffset + end; // End is actual number of items, add skip offset
+    
+    const filename = generateFilename(titleSlug, actualStartIndex, actualEndIndex, outputDir);
+    
+    console.log(`\n📄 Exporting file ${fileIndex + 1}/${totalFiles}: ${path.basename(filename)}`);
+    console.log(`   Items: ${actualStartIndex}-${actualEndIndex} (${chunk.length} items)`);
+    console.log(`   Data indices: [${start}] to [${end - 1}] (relative to sliced data, 0-based)`);
+    
+    try {
+      const csvContent = convertChunkToCSV(headers, chunk);
+      fs.writeFileSync(filename, csvContent, 'utf-8');
+      exportedFiles.push(filename);
+      console.log(`   ✅ Created: ${path.basename(filename)}`);
+    } catch (error) {
+      console.error(`   ❌ Error creating file ${filename}:`, error);
+      throw error;
+    }
+  }
+  
+  return exportedFiles;
+}
+
+/**
+ * Test export logic with skip and limit (dry-run, no files created)
+ * @param {number} totalItems - Total items in data
+ * @param {number} skip - Number of items to skip
+ * @param {number} limit - Maximum number of items to export
+ * @param {string} titleSlug - Title slug for filename
+ */
+function testExportLogic(totalItems, skip, limit, titleSlug = 'test-category') {
+  console.log('\n🧪 TEST EXPORT LOGIC (DRY RUN)');
+  console.log('='.repeat(60));
+  console.log(`📊 Input parameters:`);
+  console.log(`   Total items: ${totalItems}`);
+  console.log(`   Skip: ${skip}`);
+  console.log(`   Limit: ${limit}`);
+  console.log(`   Title slug: ${titleSlug}`);
+  
+  // Apply skip and limit
+  const actualSkip = Math.max(0, skip);
+  const actualLimit = limit !== null ? Math.min(limit, totalItems - actualSkip) : (totalItems - actualSkip);
+  const startIndex = actualSkip; // 0-based
+  const endIndex = actualSkip + actualLimit; // 0-based (exclusive)
+  
+  console.log(`\n📐 Calculated values:`);
+  console.log(`   Actual skip: ${actualSkip}`);
+  console.log(`   Actual limit: ${actualLimit}`);
+  console.log(`   Data range: [${startIndex}] to [${endIndex - 1}] (0-based index, inclusive)`);
+  console.log(`   Items to export: ${actualLimit} items`);
+  
+  if (actualLimit <= 0) {
+    console.log('\n⚠️  No items to export after applying skip/limit');
+    return;
+  }
+  
+  // Calculate how many files will be created
+  const totalFiles = Math.ceil(actualLimit / ITEMS_PER_FILE);
+  console.log(`\n📦 File splitting:`);
+  console.log(`   Items per file: ${ITEMS_PER_FILE}`);
+  console.log(`   Total files: ${totalFiles}`);
+  
+  console.log(`\n📄 Files that would be created:`);
+  for (let fileIndex = 0; fileIndex < totalFiles; fileIndex++) {
+    const relativeStart = fileIndex * ITEMS_PER_FILE;
+    const relativeEnd = Math.min(relativeStart + ITEMS_PER_FILE, actualLimit);
+    const chunkSize = relativeEnd - relativeStart;
+    
+    // Calculate actual indices for filename (1-based, with skip offset)
+    const actualStartIndex = actualSkip + relativeStart + 1; // Start from 1, not 0, add skip
+    const actualEndIndex = actualSkip + relativeEnd; // End is actual number of items, add skip
+    
+    const filename = generateFilename(titleSlug, actualStartIndex, actualEndIndex, './test/data');
+    
+    console.log(`\n   File ${fileIndex + 1}/${totalFiles}: ${path.basename(filename)}`);
+    console.log(`   ├─ Filename indices: ${actualStartIndex}-${actualEndIndex} (1-based)`);
+    console.log(`   ├─ Data range: [${actualSkip + relativeStart}] to [${actualSkip + relativeEnd - 1}] (0-based, original data)`);
+    console.log(`   └─ Items in file: ${chunkSize}`);
+  }
+  
+  console.log(`\n✅ Test complete!`);
+  console.log('='.repeat(60));
+}
+
+/**
  * Main function
  */
 function main() {
-  // Get output filename from command line argument or use default
-  const outputFilename = process.argv[2] || 'scraped-data.csv';
+  // Parse command line arguments
+  // Usage: 
+  //   node convert_data_to_csv.js [titleSlug] [outputDir]
+  //   node convert_data_to_csv.js --test [totalItems] [skip] [limit] [titleSlug]
+  // Example: 
+  //   node convert_data_to_csv.js "thuoc/thuoc-tim-mach-and-mau" "./test/data"
+  //   node convert_data_to_csv.js --test 968 568 400 "thuoc/thuoc-tim-mach-and-mau"
+  
+  // Check for test mode
+  if (process.argv[2] === '--test' || process.argv[2] === '--dry-run') {
+    const totalItems = parseInt(process.argv[3] || '968', 10);
+    const skip = parseInt(process.argv[4] || '568', 10);
+    const limit = parseInt(process.argv[5] || '400', 10);
+    const titleSlug = process.argv[6] || 'thuoc/thuoc-tim-mach-and-mau';
+    
+    testExportLogic(totalItems, skip, limit, titleSlug);
+    return;
+  }
+  
+  const titleSlug = process.argv[2] || null;
+  const outputDir = process.argv[3] || __dirname;
   
   const dataFilePath = path.join(__dirname, 'data.txt');
-  const outputFilePath = path.join(__dirname, outputFilename);
   
   try {
     // Read the entire file
-    console.log('Reading data from:', dataFilePath);
+    console.log('📖 Reading data from:', dataFilePath);
     const fileContent = fs.readFileSync(dataFilePath, 'utf-8');
     
     // Parse the entire JSON array
-    console.log('Parsing JSON...');
+    console.log('🔍 Parsing JSON...');
     const data = JSON.parse(fileContent);
     
-    console.log(`Parsed ${data.length} items from entire file`);
+    console.log(`✅ Parsed ${data.length} items from file`);
     
-    // Convert to CSV
-    console.log('Converting to CSV...');
-    const csvContent = convertToCSV(data);
+    // Use titleSlug if provided, otherwise extract from data
+    let finalTitleSlug = titleSlug;
+    if (!finalTitleSlug) {
+      const extracted = extractCategorySlug(data);
+      if (extracted) {
+        finalTitleSlug = extracted;
+        console.log(`📌 Using extracted categorySlug: ${finalTitleSlug}`);
+      } else {
+        console.log('⚠️  No titleSlug provided and could not extract from data');
+      }
+    } else {
+      console.log(`📌 Using provided titleSlug: ${finalTitleSlug}`);
+    }
     
-    // Write to file
-    console.log('Writing to:', outputFilePath);
-    fs.writeFileSync(outputFilePath, csvContent, 'utf-8');
-    
-    console.log('✅ Successfully created CSV file!');
-    console.log(`📊 Exported ${data.length} products`);
-    console.log(`📁 Output file: ${outputFilePath}`);
+    // Check if we need to split into multiple files
+    if (data.length > ITEMS_PER_FILE) {
+      console.log(`\n📦 Data has ${data.length} items, splitting into multiple files...`);
+      const exportedFiles = exportMultipleFiles(data, finalTitleSlug, outputDir);
+      
+      console.log('\n✅ Successfully exported all files!');
+      console.log(`📊 Total: ${data.length} products in ${exportedFiles.length} files`);
+      console.log(`📁 Output directory: ${outputDir}`);
+      console.log('\n📄 Exported files:');
+      exportedFiles.forEach((file, index) => {
+        console.log(`   ${index + 1}. ${path.basename(file)}`);
+      });
+    } else {
+      // Single file export
+      console.log('\n📄 Converting to CSV (single file)...');
+      const csvContent = convertToCSV(data);
+      
+      const actualStartIndex = 1;
+      const actualEndIndex = data.length;
+      const filename = generateFilename(finalTitleSlug, actualStartIndex, actualEndIndex, outputDir);
+      
+      console.log(`💾 Writing to: ${filename}`);
+      fs.writeFileSync(filename, csvContent, 'utf-8');
+      
+      console.log('\n✅ Successfully created CSV file!');
+      console.log(`📊 Exported ${data.length} products`);
+      console.log(`📁 Output file: ${filename}`);
+    }
     
   } catch (error) {
     console.error('❌ Error:', error);
@@ -420,5 +639,14 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { convertToCSV, normalizeToAPIFormat, flattenProductDetail };
+module.exports = { 
+  convertToCSV, 
+  convertChunkToCSV,
+  normalizeToAPIFormat, 
+  flattenProductDetail,
+  exportMultipleFiles,
+  generateFilename,
+  normalizeTitleSlug,
+  testExportLogic
+};
 

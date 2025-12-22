@@ -305,7 +305,6 @@
   };
 
   const showDoneBadge = (tabId) => setBadge(tabId, '✓', '#4CAF50');
-  const showClickMeBadge = (tabId) => setBadge(tabId, 'click', '#FF6B6B');
   const clearBadge = (tabId) => setBadge(tabId, '', undefined);
 
   // Clear badge on install/update
@@ -338,8 +337,8 @@
         return; // Return undefined - message will propagate to popup
       }
       
-      // For standalone list scraping, show click-me badge to notify user
-      if (sender?.tab?.id) showClickMeBadge(sender.tab.id);
+      // For standalone list scraping, show done badge
+      if (sender?.tab?.id) showDoneBadge(sender.tab.id);
       
       // Forward to all tabs (for content scripts that might be listening)
       chrome.tabs.query({}, (tabs) => {
@@ -365,8 +364,8 @@
         return; // Return undefined - message will propagate to popup
       }
       
-      // For standalone list scraping, show click-me badge to notify user
-      if (sender?.tab?.id) showClickMeBadge(sender.tab.id);
+      // For standalone list scraping, show done badge
+      if (sender?.tab?.id) showDoneBadge(sender.tab.id);
       
       // Forward to all tabs (for content scripts that might be listening)
       chrome.tabs.query({}, (tabs) => {
@@ -408,10 +407,10 @@
     }
 
     if (request.action === 'detailsScrapingComplete') {
-      // Show badge to notify user to click popup for download
+      // Show done badge
       const tabId = sender?.tab?.id;
       if (tabId) {
-        showClickMeBadge(tabId);
+        showDoneBadge(tabId);
       }
       return false;
     }
@@ -422,11 +421,11 @@
       return false;
     }
     
-    // Show badge when scraping is complete (notify user to click popup for download)
+    // Show badge when scraping is complete
     if (request.action === 'showScrapeCompleteBadge') {
       const tabId = sender?.tab?.id;
       if (tabId) {
-        showClickMeBadge(tabId);
+        showDoneBadge(tabId);
       }
       return false; // Don't consume message
     }

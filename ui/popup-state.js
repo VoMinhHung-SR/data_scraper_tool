@@ -7,6 +7,7 @@
   window.PopupState = {
     currentListData: null,
     currentDetailData: null,
+    currentFailedLinks: [],
     currentTab: null,
     messageTimeout: null,
     STORAGE_KEY_LIST: 'scraper_list_data',
@@ -67,6 +68,7 @@
       // Clear in-memory state
       this.currentListData = null;
       this.currentDetailData = null;
+      this.currentFailedLinks = [];
       
       // Collect ALL scraper-related keys to remove
       // NOTE: scraper_last_url is NOT cleared - it's used to detect URL changes
@@ -122,6 +124,14 @@
     setDetailData: function(data) {
       this.currentDetailData = data;
       this.saveDetailData(data);
+    },
+
+    setFailedLinks: function(failedLinks) {
+      this.currentFailedLinks = Array.isArray(failedLinks) ? failedLinks : [];
+    },
+
+    getFailedLinks: function() {
+      return this.currentFailedLinks || [];
     },
 
     /**

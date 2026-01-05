@@ -16,6 +16,301 @@
   }
 
   // ============================================
+  // 🔧 HELPER FUNCTIONS (Product Detail Extraction)
+  // ============================================
+  
+  /**
+   * Extract price information from container
+   */
+  const extractPriceInfo = (container, Utils) => {
+    let currentPrice = '';
+    let currentPriceValue = 0;
+    let originalPrice = '';
+    let originalPriceValue = 0;
+    let discount = 0;
+    let discountPercent = 0;
+    
+    // Tìm current price (giá hiện tại - giá discount)
+    const priceEl = Utils.safeQuery('[data-test="price"]', container) ||
+                   Utils.safeQuery('span[class*="font-semibold"], span[class*="font-bold"], span[class*="text-heading"], span[class*="text-title"]', container);
+    
+    if (priceEl) {
+      const priceText = Utils.getText(priceEl).trim();
+      // Chỉ lấy nếu có pattern giá (số + đ/₫), không phải text như "tư vấn"
+      const isConsultProduct = priceText && (
+        priceText.toLowerCase().includes('tư vấn') ||
+        priceText.toLowerCase().includes('consult') ||
+        priceText.toLowerCase().includes('liên hệ') ||
+        priceText.toLowerCase().includes('cần tư vấn')
+      );
+      
+      if (!isConsultProduct) {
+        const priceMatch = priceText.match(/(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s*([₫đ])/);
+        if (priceMatch) {
+          currentPrice = priceText;
+          const numStr = priceMatch[1].replace(/[.,]/g, '');
+          currentPriceValue = parseInt(numStr, 10) || 0;
+        }
+      }
+    }
+    
+    // Tìm original price (giá gốc - có line-through)
+    const originalPriceEl = Utils.safeQuery('p[class*="line-through"], span[class*="line-through"], div[class*="line-through"]', container) ||
+                           Utils.safeQuery('p.text-gray-7, span.text-gray-7', container);
+    
+    if (originalPriceEl) {
+      const originalPriceText = Utils.getText(originalPriceEl).trim();
+      const originalPriceMatch = originalPriceText.match(/(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s*([₫đ])/);
+      if (originalPriceMatch) {
+        originalPrice = originalPriceText;
+        const numStr = originalPriceMatch[1].replace(/[.,]/g, '');
+        originalPriceValue = parseInt(numStr, 10) || 0;
+        
+        // Tính discount nếu có cả currentPrice và originalPrice
+        if (currentPriceValue > 0 && originalPriceValue > 0 && originalPriceValue > currentPriceValue) {
+          discount = originalPriceValue - currentPriceValue;
+          discountPercent = Math.round((discount / originalPriceValue) * 100);
+        }
+      }
+    }
+    
+    // Nếu không tìm thấy original price từ line-through, thử tìm trong cùng container với price
+    if (!originalPrice && priceEl) {
+      const priceParent = priceEl.parentElement;
+      if (priceParent) {
+        const siblings = Array.from(priceParent.children);
+        for (const sibling of siblings) {
+          if (sibling !== priceEl && (sibling.classList.contains('line-through') || 
+              sibling.classList.contains('text-gray-7'))) {
+            const siblingText = Utils.getText(sibling).trim();
+            const siblingMatch = siblingText.match(/(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s*([₫đ])/);
+            if (siblingMatch) {
+              originalPrice = siblingText;
+              const numStr = siblingMatch[1].replace(/[.,]/g, '');
+              originalPriceValue = parseInt(numStr, 10) || 0;
+              
+              if (currentPriceValue > 0 && originalPriceValue > 0 && originalPriceValue > currentPriceValue) {
+                discount = originalPriceValue - currentPriceValue;
+                discountPercent = Math.round((discount / originalPriceValue) * 100);
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    return {
+      currentPrice,
+      currentPriceValue,
+      originalPrice,
+      originalPriceValue,
+      discount,
+      discountPercent
+    };
+  };
+
+  /**
+   * Normalize unit code
+   */
+  const normalizeUnitCode = (unitName) => {
+    return unitName.toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .replace(/^(hop|hoop)$/i, 'hop')
+      .replace(/^(vi|vỉ)$/i, 'vi')
+      .replace(/^(vien|viên)$/i, 'vien')
+      .replace(/^(goi|gói)$/i, 'goi')
+      .replace(/^(chai)$/i, 'chai')
+      .replace(/^(tuyp|tuýp)$/i, 'tuyp')
+      .replace(/^(ong|ống)$/i, 'ong')
+      || 'default';
+  };
+
+  /**
+   * Extract value from row with specific label
+   */
+  const extractSpecValue = (labelPattern, container, Utils) => {
+    const specRows = Utils.safeQueryAll('div[class*="flex"], tr, div[class*="detail-item"]', container);
+    
+    for (const row of specRows) {
+      const rowText = Utils.getText(row).trim();
+      // Kiểm tra nếu row chứa label
+      if (labelPattern.test(rowText)) {
+        // Strategy 1: Tìm label element (p với class text-gray-7) trước
+        const labelEl = Utils.safeQuery('p[class*="text-gray-7"], p[class*="text-body"], div[class*="text-gray-7"]', row);
+        
+        if (labelEl && labelPattern.test(Utils.getText(labelEl).trim())) {
+          // Tìm element [data-theme-element="article"] trong cùng row, nhưng không phải là label
+          const allArticleEls = Utils.safeQueryAll('[data-theme-element="article"]', row);
+          for (const articleEl of allArticleEls) {
+            const articleText = Utils.getText(articleEl).trim();
+            // Đảm bảo không phải là label và có nội dung
+            if (articleText && !labelPattern.test(articleText) && articleText !== Utils.getText(labelEl).trim()) {
+              // Loại bỏ các text không cần thiết như "Sao chép"
+              const cleanedText = articleText.replace(/\s*Sao\s+chép.*/i, '').trim();
+              if (cleanedText) {
+                return cleanedText;
+              }
+            }
+          }
+          
+          // Strategy 2: Tìm div có class text-gray-10 và text-body trong cùng row với label
+          const valueDivs = Utils.safeQueryAll('div', row);
+          for (const div of valueDivs) {
+            const divClass = div.className || '';
+            const divText = Utils.getText(div).trim();
+            
+            // Kiểm tra nếu div có class text-gray-10 và text-body và không phải là label
+            if ((divClass.includes('text-gray-10') && (divClass.includes('text-body') || divClass.includes('text-body1') || divClass.includes('text-body2'))) &&
+                divText && !labelPattern.test(divText) && divText !== Utils.getText(labelEl).trim()) {
+              // Loại bỏ các text không cần thiết
+              const cleanedText = divText.replace(/\s*Sao\s+chép.*/i, '').trim();
+              if (cleanedText) {
+                return cleanedText;
+              }
+            }
+          }
+        } else {
+          // Strategy 3: Nếu không tìm thấy label element, tìm trực tiếp [data-theme-element="article"] trong row
+          const allArticleEls = Utils.safeQueryAll('[data-theme-element="article"]', row);
+          for (const articleEl of allArticleEls) {
+            const articleText = Utils.getText(articleEl).trim();
+            if (articleText && !labelPattern.test(articleText)) {
+              const cleanedText = articleText.replace(/\s*Sao\s+chép.*/i, '').trim();
+              if (cleanedText) {
+                return cleanedText;
+              }
+            }
+          }
+        }
+        
+        // Strategy 4: Nếu vẫn chưa tìm thấy, lấy text sau label trong cùng row
+        const parts = rowText.split(labelPattern);
+        if (parts.length > 1) {
+          const valuePart = parts[1].trim().split(/\n/)[0].trim();
+          if (valuePart && !labelPattern.test(valuePart)) {
+            const cleanedText = valuePart.replace(/\s*Sao\s+chép.*/i, '').trim();
+            if (cleanedText) {
+              return cleanedText;
+            }
+          }
+        }
+      }
+    }
+    
+    return '';
+  };
+
+  /**
+   * Find section by class name or heading text
+   */
+  const findSectionByClassOrHeading = (className, headingPattern, defaultId, Utils) => {
+    // Ưu tiên 1: Tìm theo class name
+    const sectionByClass = Utils.safeQuery(`.${className}, [class*="${className}"]`);
+    if (sectionByClass) {
+      // Đảm bảo class name đúng (không phải class khác chứa className)
+      const sectionClass = sectionByClass.className || '';
+      if (sectionClass.includes(className) || sectionClass === className) {
+        return sectionByClass.id || null;
+      }
+    }
+    
+    // Ưu tiên 2: Tìm theo heading text
+    const allSections = Utils.safeQueryAll('[id^="detail-content-"]');
+    for (const sec of allSections) {
+      const heading = Utils.safeQuery('h2, h3, h4', sec);
+      if (heading) {
+        const headingText = Utils.getText(heading);
+        if (headingPattern && headingPattern.test(headingText)) {
+          return sec.id;
+        }
+      }
+    }
+    
+    // KHÔNG dùng defaultId - return null nếu không tìm thấy
+    return null;
+  };
+
+  /**
+   * Extract basic info (name, sku, brand, slug)
+   */
+  const extractBasicInfo = (container, Utils) => {
+    const fullText = Utils.getText(container);
+    
+    // Extract name
+    let name = '';
+    const nameSelectors = [
+      'h1',
+      '[data-test-id="product-name"]',
+      '[class*="product-name"]',
+      '[class*="product-title"]',
+      'div:first-child',
+    ];
+    for (const sel of nameSelectors) {
+      const nameEl = Utils.safeQuery(sel, container);
+      if (nameEl) {
+        const nameText = Utils.getText(nameEl).trim();
+        if (nameText && nameText.length > 10 && !nameText.match(/^\d+$/) && !nameText.includes('đánh giá')) {
+          name = nameText.split('\n')[0].trim();
+          break;
+        }
+      }
+    }
+    // Fallback: tìm div có text dài nhất không chứa button/price
+    if (!name) {
+      const allDivs = Utils.safeQueryAll('div', container);
+      for (const div of allDivs) {
+        const divText = Utils.getText(div).trim();
+        if (divText.length > 20 && divText.length < 200 && 
+            !divText.includes('Chọn') && !divText.includes('đánh giá') &&
+            !divText.match(/^\d+[.,]?\d*\s*[₫đ]/)) {
+          name = divText.split('\n')[0].trim();
+          break;
+        }
+      }
+    }
+    
+    // Extract SKU
+    let sku = '';
+    const skuEl = Utils.safeQuery('[data-test-id="sku"]', container);
+    if (skuEl) {
+      sku = Utils.getText(skuEl).trim();
+    } else {
+      const skuMatch = fullText.match(/\b\d{6,8}\b/);
+      if (skuMatch) {
+        sku = skuMatch[0];
+      } else {
+        sku = Utils.getText(Utils.safeQuery('[class*="sku"], [class*="code"]', container));
+      }
+    }
+    
+    // Extract brand
+    let brand = '';
+    const brandEl = Utils.safeQuery('div.font-medium', container);
+    if (brandEl) {
+      const brandText = Utils.getText(brandEl);
+      const brandMatch = brandText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
+      if (brandMatch) {
+        brand = brandMatch[1].trim();
+      } else {
+        brand = brandText.replace(/Thương\s+hiệu[:\s]*/gi, '').trim();
+      }
+    } else {
+      const brandMatch = fullText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
+      if (brandMatch) {
+        brand = brandMatch[1].trim().split(/\s+/)[0];
+      }
+    }
+    
+    // Extract slug from URL
+    const url = window.location.href || '';
+    const urlMatch = url.match(/\/([^\/]+)\.html$/);
+    const slug = urlMatch ? urlMatch[1] : '';
+    
+    return { name, sku, brand, slug };
+  };
+
+  // ============================================
   // 📊 DATA SCRAPER (Composed from modules)
   // ============================================
   const Scraper = {
@@ -37,7 +332,7 @@
     // Scrape chi tiết sản phẩm từ trang detail (chỉ dùng DOM)
     scrapeProductDetail: async (forceAPI = false) => {
       try {
-        const domData = Scraper.scrapeProductDetailFromDOM();
+        const domData = await Scraper.scrapeProductDetailFromDOM();
         
         // Accept both flat and grouped detail formats
         const hasFlatFields = domData && (domData.name || domData.sku);
@@ -49,7 +344,7 @@
         
         return null;
       } catch (error) {
-        return Scraper.scrapeProductDetailFromDOM();
+        return await Scraper.scrapeProductDetailFromDOM();
       }
     },
 
@@ -197,106 +492,158 @@
     },
 
     // Scrape chi tiết từ DOM (fallback)
-    scrapeProductDetailFromDOM: () => {
+    scrapeProductDetailFromDOM: async () => {
       try {
+        // ============================================
+        // 1. INITIALIZE CONTAINER
+        // ============================================
         const productInfoContainer = Utils.safeQuery('[data-lcpr="prr-id-product-detail-product-information"]') ||
                                      Utils.safeQuery('[class*="product-detail"]') ||
                                      document.body;
         
         const fullText = Utils.getText(productInfoContainer);
+        const detailContainer = Utils.safeQuery('[class*="product-detail-container"], [class*="po.t.-detail"]', productInfoContainer) || productInfoContainer;
         
-        // Extract name - ưu tiên các selector cụ thể
-        let name = '';
-        const nameSelectors = [
-          'h1',
-          '[data-test-id="product-name"]',
-          '[class*="product-name"]',
-          '[class*="product-title"]',
-          'div:first-child', // Fallback cho div đầu tiên có text dài
-        ];
-        for (const sel of nameSelectors) {
-          const nameEl = Utils.safeQuery(sel, productInfoContainer);
-          if (nameEl) {
-            const nameText = Utils.getText(nameEl).trim();
-            // Lọc bỏ các text không phải tên sản phẩm
-            if (nameText && nameText.length > 10 && !nameText.match(/^\d+$/) && !nameText.includes('đánh giá')) {
-              name = nameText.split('\n')[0].trim(); // Lấy dòng đầu tiên
-              break;
-            }
-          }
-        }
-        // Fallback: tìm div có text dài nhất không chứa button/price
-        if (!name) {
-          const allDivs = Utils.safeQueryAll('div', productInfoContainer);
-          for (const div of allDivs) {
-            const divText = Utils.getText(div).trim();
-            if (divText.length > 20 && divText.length < 200 && 
-                !divText.includes('Chọn') && !divText.includes('đánh giá') &&
-                !divText.match(/^\d+[.,]?\d*\s*[₫đ]/)) {
-              name = divText.split('\n')[0].trim();
-              break;
-            }
-          }
+        // ============================================
+        // 2. EXTRACT BASIC INFO (name, sku, brand, slug)
+        // ============================================
+        const basicInfo = extractBasicInfo(productInfoContainer, Utils);
+        let name = basicInfo.name;
+        let sku = basicInfo.sku;
+        let brand = basicInfo.brand;
+        const slug = basicInfo.slug;
+        
+        // ============================================
+        // 3. EXTRACT PRICING INFO
+        // ============================================
+        const priceInfo = extractPriceInfo(productInfoContainer, Utils);
+        let price = priceInfo.currentPrice || '';
+        
+        // Nếu không có giá, set thành rỗng (sẽ được format thành CONSULT sau)
+        if (!price || price.trim() === '') {
+          price = '';
         }
         
-        // Extract SKU - ưu tiên data-test-id="sku"
-        let sku = '';
-        const skuEl = Utils.safeQuery('[data-test-id="sku"]', productInfoContainer);
-        if (skuEl) {
-          sku = Utils.getText(skuEl).trim();
-        } else {
-          // Fallback: tìm số 6-8 chữ số
-          const skuMatch = fullText.match(/\b\d{6,8}\b/);
-          if (skuMatch) {
-            sku = skuMatch[0];
-          } else {
-            sku = Utils.getText(Utils.safeQuery('[class*="sku"], [class*="code"]', productInfoContainer));
-          }
-        }
-        
-        // Extract brand - ưu tiên div.font-medium hoặc text sau "Thương hiệu:"
-        let brand = '';
-        const brandEl = Utils.safeQuery('div.font-medium', productInfoContainer);
-        if (brandEl) {
-          const brandText = Utils.getText(brandEl);
-          const brandMatch = brandText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
-          if (brandMatch) {
-            brand = brandMatch[1].trim();
-          } else {
-            brand = brandText.replace(/Thương\s+hiệu[:\s]*/gi, '').trim();
-          }
-        } else {
-          const brandMatch = fullText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
-          if (brandMatch) {
-            brand = brandMatch[1].trim().split(/\s+/)[0]; // Chỉ lấy từ đầu tiên
-          }
-        }
-        
-        // Extract price - ưu tiên data-test="price"
-        let price = '';
-        const priceEl = Utils.safeQuery('[data-test="price"]', productInfoContainer);
-        if (priceEl) {
-          price = Utils.getText(priceEl).trim();
-        } else {
-          // Fallback: tìm span có price pattern
-          const priceSpan = Utils.safeQuery('span[class*="font-semibold"], span[class*="font-bold"]', productInfoContainer);
-          if (priceSpan) {
-            const priceText = Utils.getText(priceSpan);
-            const priceMatch = priceText.match(/(\d+[.,]?\d*\s*[₫đ])/);
-            if (priceMatch) {
-              price = priceMatch[1].trim();
-            }
-          }
-        }
-        
-        // Extract package size - ưu tiên data-test="unit", sau đó tìm element có class text-gray-10
+        // ============================================
+        // 4. EXTRACT PACKAGE SIZE
+        // ============================================
         let packageSize = '';
-        const unitEl = Utils.safeQuery('[data-test="unit"]', productInfoContainer);
-        if (unitEl) {
-          packageSize = Utils.getText(unitEl).trim();
-        } else {
-          // Tìm element có class text-gray-10 text-body2 (packageSize trong CONSULT case)
-          // Tìm tất cả div có class chứa text-gray-10 và text-body2
+        
+        // Tìm tất cả các row/div có thể chứa specifications (ưu tiên div.flex)
+        const specRows = Utils.safeQueryAll('div[class*="flex"], tr, div[class*="detail-item"], div[class*="spec"]', detailContainer);
+        
+        for (const row of specRows) {
+          const rowText = Utils.getText(row).trim();
+          // Kiểm tra nếu row chứa label "Quy cách"
+          if (/Quy\s+cách/i.test(rowText)) {
+            // Tìm element [data-theme-element="article"] trong row này (element ngang hàng)
+            // Đây là element chứa giá trị "Hộp 20 ống"
+            const articleEl = Utils.safeQuery('[data-theme-element="article"]', row);
+            if (articleEl) {
+              const articleText = Utils.getText(articleEl).trim();
+              // Kiểm tra nếu text có pattern package (Hộp, Gói, Vỉ, etc.) kèm số
+              if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+.*\d+/i.test(articleText)) {
+                packageSize = articleText;
+                break;
+              }
+            }
+            
+            // Nếu không tìm thấy article element, tìm div có class text-gray-10 và text-body trong row
+            // (element ngang hàng với label "Quy cách")
+            if (!packageSize) {
+              // Tìm tất cả div trong row có class chứa text-gray-10 và text-body
+              const valueDivs = Utils.safeQueryAll('div', row);
+              for (const div of valueDivs) {
+                const divClass = div.className || '';
+                const divText = Utils.getText(div).trim();
+                
+                // Kiểm tra nếu div có class text-gray-10 và text-body (hoặc text-body1, text-body2)
+                // và text có pattern package kèm số, và không phải là label "Quy cách"
+                if ((divClass.includes('text-gray-10') && (divClass.includes('text-body') || divClass.includes('text-body1') || divClass.includes('text-body2'))) &&
+                    /^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+.*\d+/i.test(divText) &&
+                    !/Quy\s+cách/i.test(divText)) {
+                  packageSize = divText;
+                  break;
+                }
+              }
+            }
+            
+            // Nếu vẫn chưa tìm thấy, tìm div có class text-gray-10 hoặc text-body trong row
+            if (!packageSize) {
+              const valueDivs = Utils.safeQueryAll('div[class*="text-gray-10"], div[class*="text-body"]', row);
+              for (const div of valueDivs) {
+                const divText = Utils.getText(div).trim();
+                // Kiểm tra nếu text có pattern package kèm số và không phải là label
+                if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+.*\d+/i.test(divText) && !/Quy\s+cách/i.test(divText)) {
+                  packageSize = divText;
+                  break;
+                }
+              }
+            }
+            
+            // Nếu vẫn chưa tìm thấy, lấy text sau "Quy cách" trong cùng row
+            if (!packageSize) {
+              const parts = rowText.split(/Quy\s+cách/i);
+              if (parts.length > 1) {
+                const valuePart = parts[1].trim().split(/\n/)[0].trim();
+                if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+.*\d+/i.test(valuePart)) {
+                  packageSize = valuePart;
+                }
+              }
+            }
+            
+            if (packageSize) break;
+          }
+        }
+        
+        // Strategy 1b: Nếu không tìm thấy trong table, tìm element [data-theme-element="article"] 
+        // trong product detail container với context đúng (có class text-gray-10, text-body)
+        if (!packageSize && detailContainer) {
+          // Tìm tất cả element [data-theme-element="article"] trong detail container
+          const articleEls = Utils.safeQueryAll('[data-theme-element="article"]', detailContainer);
+          for (const articleEl of articleEls) {
+            const articleText = Utils.getText(articleEl).trim();
+            // Kiểm tra nếu text có pattern package (Hộp, Gói, Vỉ, etc.) kèm số
+            if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+.*\d+/i.test(articleText)) {
+              // Kiểm tra xem element có nằm trong context đúng không
+              // Tìm parent có class chứa text-gray-10 và text-body
+              let current = articleEl.parentElement;
+              let found = false;
+              let depth = 0;
+              while (current && depth < 5) {
+                const parentClass = current.className || '';
+                // Kiểm tra nếu parent có class text-gray-10 và text-body (hoặc text-body1, text-body2)
+                if ((parentClass.includes('text-gray-10') && parentClass.includes('text-body')) ||
+                    (parentClass.includes('product-detail-container') || parentClass.includes('po.t.-detail'))) {
+                  // Kiểm tra xem có nằm gần label "Quy cách" không
+                  const parentText = Utils.getText(current).trim();
+                  if (/Quy\s+cách/i.test(parentText)) {
+                    found = true;
+                    break;
+                  }
+                }
+                current = current.parentElement;
+                depth++;
+              }
+              
+              if (found) {
+                packageSize = articleText;
+                break;
+              }
+            }
+          }
+        }
+        
+        // Strategy 2: Tìm từ data-test="unit"
+        if (!packageSize) {
+          const unitEl = Utils.safeQuery('[data-test="unit"]', productInfoContainer);
+          if (unitEl) {
+            packageSize = Utils.getText(unitEl).trim();
+          }
+        }
+        
+        // Strategy 3: Tìm element có class text-gray-10 text-body2 (packageSize trong CONSULT case)
+        if (!packageSize) {
           const allDivs = Utils.safeQueryAll('div', productInfoContainer);
           let packageSizeEl = null;
           for (const div of allDivs) {
@@ -313,22 +660,525 @@
           
           if (packageSizeEl) {
             const packageText = Utils.getText(packageSizeEl).trim();
-            // Chỉ lấy phần đơn vị đầu tiên (Hộp, Chai, Tuýp, Gói, Vỉ, Ống, Viên, ml, g)
-            const unitMatch = packageText.match(/^(Hộp|Chai|Tuýp|Gói|Vỉ|Ống|Viên|ml|g)/i);
-            if (unitMatch) {
-              packageSize = unitMatch[1];
-            } else {
+            // Lấy toàn bộ text nếu có số (ví dụ: "Hộp 20 ống"), nếu không chỉ lấy đơn vị
+            if (/\d/.test(packageText)) {
               packageSize = packageText;
+            } else {
+              const unitMatch = packageText.match(/^(Hộp|Chai|Tuýp|Gói|Vỉ|Ống|Viên|ml|g)/i);
+              if (unitMatch) {
+                packageSize = unitMatch[1];
+              } else {
+                packageSize = packageText;
+              }
+            }
+          }
+        }
+        
+        // Strategy 4: Tìm từ specifications table (Quy cách)
+        if (!packageSize) {
+          if (specifications['Quy cách']) {
+            packageSize = specifications['Quy cách'].trim();
+          }
+        }
+        
+        // Strategy 5: Fallback - tìm từ fullText bằng regex
+        if (!packageSize) {
+          const packageMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+(\d+)\s*(ống|viên|vỉ|gói|ml|g)/i);
+          if (packageMatch) {
+            packageSize = packageMatch[0].trim();
+          } else {
+            const simpleMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*(x\s*)?\d+[^\s]*/i);
+            if (simpleMatch) {
+              packageSize = simpleMatch[0].trim();
+            }
+          }
+        }
+        
+        // ============================================
+        // 5. EXTRACT PACKAGE OPTIONS (VARIANTS)
+        // ============================================
+        // Tìm tất cả các variant options và giá tương ứng bằng cách click vào từng variant
+        const extractPackageOptionsFromDOM = async (container) => {
+          const packageOptions = [];
+          
+          // Tìm container chứa các variant options
+          const variantContainer = Utils.safeQuery('[data-lcpr="prr-id-product-detail-product-information"]', container) ||
+                                   Utils.safeQuery('[class*="product-detail"]', container) ||
+                                   container;
+          
+          // Tìm tất cả variant buttons
+          // Ưu tiên tìm bằng data-test="unit_lv1" (theo DOM path user cung cấp)
+          const variantButtons = [];
+          
+          // Strategy 1: Tìm bằng data-test="unit_lv1"
+          const unitButtons = Utils.safeQueryAll('[data-test="unit_lv1"], [data-test*="unit"]', variantContainer);
+          for (const btn of unitButtons) {
+            const btnText = Utils.getText(btn).trim();
+            if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Hộp\s+Ống)$/i.test(btnText)) {
+              if (btn.offsetParent !== null && !btn.disabled) {
+                variantButtons.push({
+                  element: btn,
+                  text: btnText,
+                  isSelected: btn.classList.contains('bg-blue') || 
+                             btn.classList.contains('selected') ||
+                             btn.getAttribute('aria-selected') === 'true' ||
+                             btn.getAttribute('data-test')?.includes('selected') ||
+                             btn.style.backgroundColor.includes('blue')
+                });
+              }
             }
           }
           
-          // Fallback: tìm từ specifications hoặc regex (giới hạn độ dài)
-          if (!packageSize) {
-            const packageMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*(x\s*)?\d+[^\s]*/i);
-          if (packageMatch) {
-            packageSize = packageMatch[0].trim();
+          // Strategy 2: Nếu không tìm thấy, tìm bằng class và text
+          if (variantButtons.length === 0) {
+            const allButtons = Utils.safeQueryAll('button, div[role="button"], div[class*="cursor-pointer"], div[class*="inline-flex"]', variantContainer);
+            
+            for (const btn of allButtons) {
+              const btnText = Utils.getText(btn).trim();
+              // Kiểm tra nếu text là variant option (Hộp, Gói, Vỉ, Ống, Viên, ml, g, Chai, Tuýp, Hộp Ống)
+              if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Hộp\s+Ống)$/i.test(btnText)) {
+                // Kiểm tra xem button có thể click được không
+                if (btn.offsetParent !== null && !btn.disabled) {
+                  variantButtons.push({
+                    element: btn,
+                    text: btnText,
+                    isSelected: btn.classList.contains('bg-blue') || 
+                               btn.classList.contains('selected') ||
+                               btn.getAttribute('aria-selected') === 'true' ||
+                               btn.style.backgroundColor.includes('blue')
+                  });
+                }
+              }
             }
           }
+          
+          // Nếu không tìm thấy buttons, fallback về cách cũ (tìm div có class text-body2 text-gray-10)
+          if (variantButtons.length === 0) {
+            const variantDivs = Utils.safeQueryAll('div', variantContainer);
+            const processedVariants = new Set();
+            
+            for (const div of variantDivs) {
+              const classList = div.className || '';
+              if (classList.includes('text-body2') && classList.includes('text-gray-10')) {
+                const variantText = Utils.getText(div).trim();
+                if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Hộp\s+Ống)/i.test(variantText)) {
+                  if (processedVariants.has(variantText)) continue;
+                  processedVariants.add(variantText);
+                  
+                  // Tìm giá từ DOM (fallback method)
+                  const variantPrice = extractPriceForVariant(div, container);
+                  
+                  const unitName = variantText.trim();
+                  const unitCode = normalizeUnitCode(unitName);
+                  
+                  packageOptions.push({
+                    unit: unitCode,
+                    unitDisplay: unitName,
+                    price: variantPrice.price || '',
+                    priceDisplay: variantPrice.priceDisplay || 'CONSULT',
+                    priceValue: variantPrice.priceValue || 0,
+                    specification: packageSize || '',
+                    isDefault: packageOptions.length === 0,
+                    isAvailable: true,
+                    conversion: null
+                  });
+                }
+              }
+            }
+            
+            return packageOptions;
+          }
+          
+          // Tìm price element để theo dõi thay đổi
+          // Tìm trong cùng container với variant buttons để đảm bảo đúng element
+          const variantParent = variantButtons.length > 0 ? variantButtons[0].element.closest('[class*="flex"], [class*="container"]') : null;
+          const searchContainer = variantParent || container;
+          
+          // Tìm price element - ưu tiên data-test="price", sau đó tìm trong cùng container với variant
+          let priceElement = Utils.safeQuery('[data-test="price"]', searchContainer) ||
+                            Utils.safeQuery('[data-test="price"]', container);
+          
+          // Nếu không tìm thấy, tìm span có font-semibold/bold gần variant buttons
+          if (!priceElement && variantButtons.length > 0) {
+            const variantContainer = variantButtons[0].element.closest('div[class*="flex"]');
+            if (variantContainer) {
+              priceElement = Utils.safeQuery('span[class*="font-semibold"], span[class*="font-bold"], span[class*="text-heading"], span[class*="text-title"]', variantContainer);
+            }
+          }
+          
+          // Fallback: tìm trong toàn bộ container
+          if (!priceElement) {
+            priceElement = Utils.safeQuery('span[class*="font-semibold"], span[class*="font-bold"]', container);
+          }
+          
+          // Tìm unit element - ưu tiên data-test="unit"
+          let unitElement = Utils.safeQuery('[data-test="unit"]', searchContainer) ||
+                           Utils.safeQuery('[data-test="unit"]', container);
+          
+          // Nếu không tìm thấy, tìm gần price element
+          if (!unitElement && priceElement) {
+            const priceParent = priceElement.parentElement;
+            if (priceParent) {
+              unitElement = Utils.safeQuery('span[class*="text-title"], span[class*="text-label"], [data-test="unit"]', priceParent);
+            }
+          }
+          
+          // Lưu variant mặc định hiện tại
+          const defaultVariant = variantButtons.find(v => v.isSelected) || variantButtons[0];
+          
+          // Helper: Chờ giá cập nhật sau khi click variant
+          // Tìm lại price element mỗi lần check để đảm bảo lấy element mới nhất
+          const waitForPriceUpdate = (oldPrice, maxWait = 3000) => {
+            return new Promise((resolve) => {
+              let attempts = 0;
+              const checkInterval = setInterval(() => {
+                attempts++;
+                
+                // Tìm lại price và unit element mỗi lần check (DOM có thể đã thay đổi)
+                let currentPriceEl = Utils.safeQuery('[data-test="price"]', searchContainer) ||
+                                    Utils.safeQuery('[data-test="price"]', container);
+                if (!currentPriceEl) {
+                  const variantContainer = variantButtons.length > 0 ? variantButtons[0].element.closest('div[class*="flex"]') : null;
+                  if (variantContainer) {
+                    currentPriceEl = Utils.safeQuery('span[class*="font-semibold"], span[class*="font-bold"]', variantContainer);
+                  }
+                }
+                if (!currentPriceEl) {
+                  currentPriceEl = Utils.safeQuery('span[class*="font-semibold"], span[class*="font-bold"]', container);
+                }
+                
+                let currentUnitEl = Utils.safeQuery('[data-test="unit"]', searchContainer) ||
+                                   Utils.safeQuery('[data-test="unit"]', container);
+                if (!currentUnitEl && currentPriceEl) {
+                  const priceParent = currentPriceEl.parentElement;
+                  if (priceParent) {
+                    currentUnitEl = Utils.safeQuery('span[class*="text-title"], span[class*="text-label"], [data-test="unit"]', priceParent);
+                  }
+                }
+                
+                const currentPrice = currentPriceEl ? Utils.getText(currentPriceEl).trim() : '';
+                const currentUnit = currentUnitEl ? Utils.getText(currentUnitEl).trim() : '';
+                
+                // Nếu giá đã thay đổi (khác oldPrice) hoặc đã chờ đủ lâu
+                if (currentPrice && currentPrice !== oldPrice && currentPrice.match(/\d+[.,]?\d*\s*[₫đ]/)) {
+                  clearInterval(checkInterval);
+                  resolve({ price: currentPrice, unit: currentUnit });
+                } else if (attempts * 100 >= maxWait) {
+                  // Timeout - trả về giá hiện tại (có thể vẫn là oldPrice nếu không thay đổi)
+                  clearInterval(checkInterval);
+                  resolve({ price: currentPrice || oldPrice, unit: currentUnit });
+                }
+              }, 100);
+            });
+          };
+          
+          // Helper: Extract giá từ price element (tìm lại element mỗi lần để đảm bảo lấy giá mới nhất)
+          // Bao gồm cả original price (line-through) để tính discount
+          const extractCurrentPrice = () => {
+            // Tìm lại price và unit element để đảm bảo lấy giá mới nhất sau khi click
+            let currentPriceEl = Utils.safeQuery('[data-test="price"]', searchContainer) ||
+                                Utils.safeQuery('[data-test="price"]', container);
+            if (!currentPriceEl) {
+              const variantContainer = variantButtons.length > 0 ? variantButtons[0].element.closest('div[class*="flex"]') : null;
+              if (variantContainer) {
+                currentPriceEl = Utils.safeQuery('span[class*="font-semibold"], span[class*="font-bold"], span[class*="text-heading"], span[class*="text-title"]', variantContainer);
+              }
+            }
+            if (!currentPriceEl) {
+              currentPriceEl = Utils.safeQuery('span[class*="font-semibold"], span[class*="font-bold"]', container);
+            }
+            
+            let currentUnitEl = Utils.safeQuery('[data-test="unit"]', searchContainer) ||
+                               Utils.safeQuery('[data-test="unit"]', container);
+            if (!currentUnitEl && currentPriceEl) {
+              const priceParent = currentPriceEl.parentElement;
+              if (priceParent) {
+                currentUnitEl = Utils.safeQuery('span[class*="text-title"], span[class*="text-label"], [data-test="unit"]', priceParent);
+              }
+            }
+            
+            const priceText = currentPriceEl ? Utils.getText(currentPriceEl).trim() : '';
+            const unitText = currentUnitEl ? Utils.getText(currentUnitEl).trim() : '';
+            
+            // Kiểm tra xem priceText có phải là giá thực sự không
+            // Nếu có text như "tư vấn", "consult", "liên hệ" thì không phải giá
+            const isConsultProduct = priceText && (
+              priceText.toLowerCase().includes('tư vấn') ||
+              priceText.toLowerCase().includes('consult') ||
+              priceText.toLowerCase().includes('liên hệ') ||
+              priceText.toLowerCase().includes('cần tư vấn')
+            );
+            
+            // Extract current price value - chỉ nếu có pattern giá
+            let priceValue = 0;
+            let validPrice = '';
+            
+            if (priceText && !isConsultProduct) {
+              const priceMatch = priceText.match(/(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s*([₫đ])/);
+              if (priceMatch) {
+                validPrice = priceText;
+                const numStr = priceMatch[1].replace(/[.,]/g, '');
+                priceValue = parseInt(numStr, 10) || 0;
+              }
+            }
+            
+            // Tìm original price (line-through) trong cùng container
+            let originalPrice = '';
+            let originalPriceValue = 0;
+            let discount = 0;
+            let discountPercent = 0;
+            
+            const priceContainer = currentPriceEl ? currentPriceEl.closest('div[class*="flex"], div[class*="container"]') : null;
+            if (priceContainer) {
+              const originalPriceEl = Utils.safeQuery('p[class*="line-through"], span[class*="line-through"], div[class*="line-through"]', priceContainer) ||
+                                     Utils.safeQuery('p.text-gray-7, span.text-gray-7', priceContainer);
+              
+              if (originalPriceEl) {
+                const originalPriceText = Utils.getText(originalPriceEl).trim();
+                const originalPriceMatch = originalPriceText.match(/(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s*([₫đ])/);
+                if (originalPriceMatch) {
+                  originalPrice = originalPriceText;
+                  const numStr = originalPriceMatch[1].replace(/[.,]/g, '');
+                  originalPriceValue = parseInt(numStr, 10) || 0;
+                  
+                  // Tính discount
+                  if (priceValue > 0 && originalPriceValue > 0 && originalPriceValue > priceValue) {
+                    discount = originalPriceValue - priceValue;
+                    discountPercent = Math.round((discount / originalPriceValue) * 100);
+                  }
+                }
+              }
+            }
+            
+            // Format price display
+            let priceDisplay = 'CONSULT';
+            if (validPrice && unitText) {
+              priceDisplay = `${validPrice} / ${unitText}`;
+            } else if (validPrice) {
+              priceDisplay = validPrice;
+            }
+            
+            return {
+              price: validPrice || '',
+              priceDisplay: priceDisplay,
+              priceValue: priceValue,
+              unit: unitText || '',
+              originalPrice: originalPrice || '',
+              originalPriceValue: originalPriceValue || 0,
+              discount: discount || 0,
+              discountPercent: discountPercent || 0
+            };
+          };
+          
+          // Click vào từng variant và lấy giá
+          for (let i = 0; i < variantButtons.length; i++) {
+            const variant = variantButtons[i];
+            
+            try {
+              // Lấy giá hiện tại trước khi click (tìm lại element để đảm bảo đúng)
+              let currentPriceEl = Utils.safeQuery('[data-test="price"]', searchContainer) ||
+                                  Utils.safeQuery('[data-test="price"]', container);
+              if (!currentPriceEl) {
+                currentPriceEl = Utils.safeQuery('span[class*="font-semibold"], span[class*="font-bold"]', container);
+              }
+              const oldPrice = currentPriceEl ? Utils.getText(currentPriceEl).trim() : '';
+              
+              // Click vào variant button
+              variant.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              await new Promise(resolve => setTimeout(resolve, 200)); // Chờ scroll
+              
+              // Click button (thử nhiều cách)
+              try {
+                // Method 1: Direct click
+                variant.element.click();
+              } catch (e) {
+                // Method 2: Dispatch mouse events
+                const clickEvent = new MouseEvent('click', {
+                  bubbles: true,
+                  cancelable: true,
+                  view: window
+                });
+                variant.element.dispatchEvent(clickEvent);
+              }
+              
+              // Method 3: Dispatch mousedown + mouseup + click (để đảm bảo React nhận được event)
+              try {
+                const mouseDownEvent = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
+                const mouseUpEvent = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
+                variant.element.dispatchEvent(mouseDownEvent);
+                await new Promise(resolve => setTimeout(resolve, 50));
+                variant.element.dispatchEvent(mouseUpEvent);
+                await new Promise(resolve => setTimeout(resolve, 50));
+                variant.element.click();
+              } catch (e) {
+                // Ignore
+              }
+              
+              // Chờ giá cập nhật (tăng timeout lên 3s)
+              await waitForPriceUpdate(oldPrice, 3000);
+              
+              // Chờ thêm một chút để đảm bảo DOM đã cập nhật hoàn toàn
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              // Extract giá sau khi click (tìm lại element để đảm bảo lấy giá mới)
+              const priceInfo = extractCurrentPrice();
+              
+              // Normalize unit
+              const unitName = variant.text.trim();
+              const unitCode = normalizeUnitCode(unitName);
+              
+              packageOptions.push({
+                unit: unitCode,
+                unitDisplay: unitName,
+                price: priceInfo.price || '',
+                priceDisplay: priceInfo.priceDisplay || 'CONSULT',
+                priceValue: priceInfo.priceValue || 0,
+                originalPrice: priceInfo.originalPrice || '',
+                originalPriceValue: priceInfo.originalPriceValue || 0,
+                discount: priceInfo.discount || 0,
+                discountPercent: priceInfo.discountPercent || 0,
+                specification: packageSize || '',
+                isDefault: variant === defaultVariant,
+                isAvailable: true,
+                conversion: null
+              });
+              
+              // Chờ một chút trước khi click variant tiếp theo
+              await new Promise(resolve => setTimeout(resolve, 200));
+              
+            } catch (error) {
+              console.warn(`[Scraper] Error extracting price for variant ${variant.text}:`, error);
+              // Vẫn thêm variant với giá rỗng
+              const unitCode = normalizeUnitCode(variant.text.trim());
+              packageOptions.push({
+                unit: unitCode,
+                unitDisplay: variant.text.trim(),
+                price: '',
+                priceDisplay: 'CONSULT',
+                priceValue: 0,
+                originalPrice: '',
+                originalPriceValue: 0,
+                discount: 0,
+                discountPercent: 0,
+                specification: packageSize || '',
+                isDefault: variant === defaultVariant,
+                isAvailable: true,
+                conversion: null
+              });
+            }
+          }
+          
+          // Reset về variant mặc định
+          if (defaultVariant && defaultVariant.element) {
+            try {
+              defaultVariant.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              await new Promise(resolve => setTimeout(resolve, 100));
+              defaultVariant.element.click();
+              await new Promise(resolve => setTimeout(resolve, 300));
+            } catch (e) {
+              // Ignore reset error
+            }
+          }
+          
+          return packageOptions;
+        };
+        
+        // Helper: Extract giá cho variant (fallback method)
+        const extractPriceForVariant = (variantDiv, container) => {
+          let variantPrice = '';
+          let variantPriceValue = 0;
+
+          // Tìm giá trong parent container
+          const parent = variantDiv.parentElement;
+          if (parent) {
+            const priceSelectors = [
+              'span[class*="font-semibold"]',
+              'span[class*="font-bold"]',
+              '[data-test="price"]'
+            ];
+
+            for (const selector of priceSelectors) {
+              const priceEl = Utils.safeQuery(selector, parent);
+              if (priceEl) {
+                const priceText = Utils.getText(priceEl).trim();
+                
+                // Kiểm tra xem có phải là sản phẩm cần tư vấn không
+                const isConsultProduct = priceText && (
+                  priceText.toLowerCase().includes('tư vấn') ||
+                  priceText.toLowerCase().includes('consult') ||
+                  priceText.toLowerCase().includes('liên hệ') ||
+                  priceText.toLowerCase().includes('cần tư vấn')
+                );
+                
+                if (!isConsultProduct) {
+                  const priceMatch = priceText.match(/(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s*([₫đ])/);
+                  if (priceMatch) {
+                    variantPrice = priceText;
+                    const numStr = priceMatch[1].replace(/[.,]/g, '');
+                    variantPriceValue = parseInt(numStr, 10) || 0;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          const priceDisplay = variantPrice || (variantPriceValue > 0 ? `${variantPriceValue.toLocaleString('vi-VN')}₫` : 'CONSULT');
+
+          return {
+            price: variantPrice,
+            priceDisplay: priceDisplay,
+            priceValue: variantPriceValue
+          };
+        };
+        
+        // Extract package options từ DOM (async - click vào từng variant để lấy giá)
+        let packageOptions = [];
+        try {
+          packageOptions = await extractPackageOptionsFromDOM(productInfoContainer);
+          if (!Array.isArray(packageOptions)) {
+            packageOptions = [];
+          }
+        } catch (error) {
+          console.warn('[Scraper] Error in extractPackageOptionsFromDOM:', error);
+          packageOptions = [];
+        }
+        
+        // Nếu không tìm thấy packageOptions từ DOM, tạo một option từ price và packageSize hiện có
+        if (packageOptions.length === 0 && (price || packageSize)) {
+          const unitName = packageSize || '';
+          const unitCode = unitName.toLowerCase()
+            .replace(/[^a-z0-9]/g, '')
+            .replace(/^(hop|hoop)$/i, 'hop')
+            .replace(/^(vi|vỉ)$/i, 'vi')
+            .replace(/^(vien|viên)$/i, 'vien')
+            .replace(/^(goi|gói)$/i, 'goi')
+            .replace(/^(chai)$/i, 'chai')
+            .replace(/^(tuyp|tuýp)$/i, 'tuyp')
+            .replace(/^(ong|ống)$/i, 'ong')
+            || 'default';
+          
+          // Extract price value từ price string
+          let priceValue = 0;
+          if (price) {
+            const priceMatch = price.match(/(\d+[.,]?\d*)/);
+            if (priceMatch) {
+              const numStr = priceMatch[1].replace(/[.,]/g, '');
+              priceValue = parseInt(numStr, 10) || 0;
+            }
+          }
+          
+          packageOptions.push({
+            unit: unitCode,
+            unitDisplay: unitName || '',
+            price: price || '',
+            priceDisplay: price || (priceValue > 0 ? `${priceValue.toLocaleString('vi-VN')}₫` : 'CONSULT'),
+            priceValue: priceValue,
+            specification: packageSize || '',
+            isDefault: true,
+            isAvailable: true,
+            conversion: null
+          });
         }
         
         // Extract rating và reviews - tìm các span cụ thể
@@ -360,8 +1210,9 @@
           }
         });
         
-        // Extract category path - từ link hoặc text
-        // Extract category and categorySlug from breadcrumb
+        // ============================================
+        // 7. EXTRACT CATEGORY
+        // ============================================
         let categoryPath = '';
         let categorySlug = '';
         let category = [];
@@ -488,7 +1339,9 @@
           }
         }
         
-        // Extract images - ưu tiên img có src từ cdn.nhathuoclongchau.com.vn
+        // ============================================
+        // 8. EXTRACT IMAGES
+        // ============================================
         let mainImage = '';
         const imageSelectors = [
           'img[src*="cdn.nhathuoclongchau.com.vn"]',
@@ -546,40 +1399,11 @@
         // Ưu tiên tìm theo heading text để đảm bảo đúng section
         // ============================================
         
-        // Helper: Tìm section theo class name (ưu tiên) hoặc heading text
-        // Return null nếu không tìm thấy (KHÔNG dùng defaultId)
-        const findSectionByClassOrHeading = (className, headingPattern, defaultId) => {
-          // Ưu tiên 1: Tìm theo class name
-          const sectionByClass = Utils.safeQuery(`.${className}, [class*="${className}"]`);
-          if (sectionByClass) {
-            // Đảm bảo class name đúng (không phải class khác chứa className)
-            const sectionClass = sectionByClass.className || '';
-            if (sectionClass.includes(className) || sectionClass === className) {
-              return sectionByClass.id || null;
-            }
-          }
-          
-          // Ưu tiên 2: Tìm theo heading text
-          const allSections = Utils.safeQueryAll('[id^="detail-content-"]');
-          for (const sec of allSections) {
-            const heading = Utils.safeQuery('h2, h3, h4', sec);
-            if (heading) {
-              const headingText = Utils.getText(heading);
-              if (headingPattern && headingPattern.test(headingText)) {
-                return sec.id;
-              }
-            }
-          }
-          
-          // KHÔNG dùng defaultId - return null nếu không tìm thấy
-          return null;
-        };
-        
         // Extract description (detail-content-0) - Mô tả sản phẩm
         // CHỈ lấy từ section description, KHÔNG lấy từ ingredient hoặc các section khác
         // Nếu không tìm thấy section description → return ""
         let description = '';
-        const descSectionId = findSectionByClassOrHeading('description', /Mô\s+tả\s+sản\s+phẩm/i, 'detail-content-0');
+        const descSectionId = findSectionByClassOrHeading('description', /Mô\s+tả\s+sản\s+phẩm/i, 'detail-content-0', Utils);
         
         // CHỈ extract nếu tìm thấy section description thực sự
         if (descSectionId) {
@@ -645,7 +1469,7 @@
         
         // Extract ingredients (detail-content-1) - Thành phần
         let ingredients = '';
-        const ingredientSectionId = findSectionByClassOrHeading('ingredient', /Thành\s+phần/i, 'detail-content-1');
+        const ingredientSectionId = findSectionByClassOrHeading('ingredient', /Thành\s+phần/i, 'detail-content-1', Utils);
         if (ingredientSectionId) {
           // Đảm bảo section có class="ingredient"
           const ingredientSection = Utils.safeQuery(`.ingredient, [class*="ingredient"]`);
@@ -690,7 +1514,7 @@
         
         // Extract usage (detail-content-2) - Công dụng
         let usage = '';
-        const usageSectionId = findSectionByClassOrHeading('usage', /Công\s+dụng/i, 'detail-content-2');
+        const usageSectionId = findSectionByClassOrHeading('usage', /Công\s+dụng/i, 'detail-content-2', Utils);
         if (usageSectionId) {
           // Đảm bảo section có class="usage"
           const usageSection = Utils.safeQuery(`.usage, [class*="usage"]`);
@@ -703,7 +1527,7 @@
         
         // Extract dosage (detail-content-3) - Cách dùng
         let dosage = '';
-        const dosageSectionId = findSectionByClassOrHeading('dosage', /Cách\s+dùng/i, 'detail-content-3');
+        const dosageSectionId = findSectionByClassOrHeading('dosage', /Cách\s+dùng/i, 'detail-content-3', Utils);
         if (dosageSectionId) {
           // Đảm bảo section có class="dosage"
           const dosageSection = Utils.safeQuery(`.dosage, [class*="dosage"]`);
@@ -716,7 +1540,7 @@
         
         // Extract adverseEffect (detail-content-4) - Tác dụng phụ
         let adverseEffect = '';
-        const adverseSectionId = findSectionByClassOrHeading('adverseEffect', /Tác\s+dụng\s+phụ/i, 'detail-content-4');
+        const adverseSectionId = findSectionByClassOrHeading('adverseEffect', /Tác\s+dụng\s+phụ/i, 'detail-content-4', Utils);
         if (adverseSectionId) {
           // Đảm bảo section có class="adverseEffect"
           const adverseSection = Utils.safeQuery(`.adverseEffect, [class*="adverseEffect"]`);
@@ -741,7 +1565,7 @@
         
         // Extract careful (detail-content-5) - Lưu ý
         let careful = '';
-        const carefulSectionId = findSectionByClassOrHeading('careful', /Lưu\s+ý/i, 'detail-content-5');
+        const carefulSectionId = findSectionByClassOrHeading('careful', /Lưu\s+ý/i, 'detail-content-5', Utils);
         if (carefulSectionId) {
           // Đảm bảo section có class="careful"
           const carefulSection = Utils.safeQuery(`.careful, [class*="careful"]`);
@@ -754,7 +1578,7 @@
         
         // Extract preservation (detail-content-6) - Bảo quản
         let preservation = '';
-        const preservationSectionId = findSectionByClassOrHeading('preservation', /Bảo\s+quản/i, 'detail-content-6');
+        const preservationSectionId = findSectionByClassOrHeading('preservation', /Bảo\s+quản/i, 'detail-content-6', Utils);
         if (preservationSectionId) {
           // Đảm bảo section có class="preservation"
           const preservationSection = Utils.safeQuery(`.preservation, [class*="preservation"]`);
@@ -765,49 +1589,192 @@
         // Đảm bảo return "" nếu không tìm thấy
         preservation = preservation || '';
         
-        // Extract thông tin bổ sung từ specifications trước, fallback về regex
-        let registrationNumber = '';
+        // Extract thông tin bổ sung từ specifications table
+        // Tìm element [data-theme-element="article"] trong row có label tương ứng
         let origin = '';
         let manufacturer = '';
         let shelfLife = '';
         
-        // Ưu tiên từ specifications, fallback về regex
-        if (specifications['Số đăng ký']) {
-          registrationNumber = specifications['Số đăng ký'].split(/\s+/)[0];
-        } else {
-          const registrationMatch = fullText.match(/Số\s+đăng\s+ký[:\s]+([^\n\r]+)/i);
-          if (registrationMatch) {
-            registrationNumber = registrationMatch[1].trim().split(/\s+/)[0];
+        // Extract origin và manufacturer từ div.flex.gap-2.flex-wrap.items-center
+        // Strategy 1: Tìm div có class chứa "flex gap-2 flex-wrap items-center"
+        const brandOriginDiv = Utils.safeQuery('div.flex.gap-2.flex-wrap.items-center, div[class*="flex"][class*="gap-2"][class*="flex-wrap"][class*="items-center"]', detailContainer) ||
+                               Utils.safeQuery('div.flex[class*="gap-2"]', detailContainer);
+        
+        if (brandOriginDiv) {
+          const brandOriginText = Utils.getText(brandOriginDiv).trim();
+          
+          // Extract origin: tìm span có class text-text-secondary text-caption
+          const originSpan = Utils.safeQuery('span[class*="text-text-secondary"][class*="text-caption"], span[class*="text-text-secondary"]', brandOriginDiv);
+          if (originSpan) {
+            origin = Utils.getText(originSpan).trim();
+          } else {
+            // Fallback: extract từ text "Việt Nam" hoặc country name
+            const originMatch = brandOriginText.match(/^([A-ZÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ][a-zàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ\s]+?)(?:\s+Thương\s+hiệu|$)/i);
+            if (originMatch && originMatch[1]) {
+              origin = originMatch[1].trim();
+            }
+          }
+          
+          // Extract manufacturer: tìm link a.text-blue-5 hoặc text sau "Thương hiệu:"
+          const manufacturerLink = Utils.safeQuery('a[class*="text-blue-5"], a[href*="thuong-hieu"]', brandOriginDiv);
+          if (manufacturerLink) {
+            manufacturer = Utils.getText(manufacturerLink).trim();
+          } else {
+            // Fallback: extract từ text sau "Thương hiệu:"
+            const manufacturerMatch = brandOriginText.match(/Thương\s+hiệu[:\s]+([^\s]+(?:\s+[^\s]+)*?)(?:\s|$)/i);
+            if (manufacturerMatch && manufacturerMatch[1]) {
+              manufacturer = manufacturerMatch[1].trim();
+            }
           }
         }
         
-        if (specifications['Xuất xứ thương hiệu']) {
-          origin = specifications['Xuất xứ thương hiệu'].split(/\s+/)[0];
-        } else if (specifications['Nước sản xuất']) {
+        // Strategy 2: Fallback về extractSpecValue
+        if (!origin) {
+          origin = extractSpecValue(/Nước\s+sản\s+xuất/i, detailContainer, Utils);
+          if (!origin) {
+            origin = extractSpecValue(/Xuất\s+xứ\s+thương\s+hiệu/i, detailContainer, Utils);
+          }
+        }
+        if (!origin && specifications['Nước sản xuất']) {
           origin = specifications['Nước sản xuất'].split(/\s+/)[0];
-        } else {
-          const originMatch = fullText.match(/Xuất\s+xứ\s+thương\s+hiệu[:\s]+([^\n\r]+)/i) || 
-                             fullText.match(/Nước\s+sản\s+xuất[:\s]+([^\n\r]+)/i);
+        } else if (!origin && specifications['Xuất xứ thương hiệu']) {
+          origin = specifications['Xuất xứ thương hiệu'].split(/\s+/)[0];
+        }
+        if (!origin) {
+          const originMatch = fullText.match(/Nước\s+sản\s+xuất[:\s]+([^\n\r]+)/i) || 
+                             fullText.match(/Xuất\s+xứ\s+thương\s+hiệu[:\s]+([^\n\r]+)/i);
           if (originMatch) {
             origin = originMatch[1].trim().split(/\s+/)[0];
           }
         }
         
-        if (specifications['Nhà sản xuất']) {
-          manufacturer = specifications['Nhà sản xuất'].split('\n')[0];
-        } else {
+        if (!manufacturer) {
+          manufacturer = extractSpecValue(/Nhà\s+sản\s+xuất/i, detailContainer, Utils);
+        }
+        if (!manufacturer && specifications['Nhà sản xuất']) {
+          manufacturer = specifications['Nhà sản xuất'].split('\n')[0].trim();
+        }
+        if (!manufacturer) {
           const manufacturerMatch = fullText.match(/Nhà\s+sản\s+xuất[:\s]+([^\n\r]+)/i);
           if (manufacturerMatch) {
-            manufacturer = manufacturerMatch[1].trim().split('\n')[0];
+            manufacturer = manufacturerMatch[1].trim().split('\n')[0].trim();
           }
         }
         
-        if (specifications['Hạn sử dụng']) {
-          shelfLife = specifications['Hạn sử dụng'].split(/\s+/)[0];
-        } else {
+        // Extract shelfLife (Hạn sử dụng)
+        // Strategy 1: Tìm div.space-y-4 (hoặc container tương tự) - hạn sử dụng thường là element cuối cùng
+        const spaceY4Container = Utils.safeQuery('div.space-y-4, div[class*="space-y-4"]', detailContainer) ||
+                                 Utils.safeQuery('div[class*="space-y"]', detailContainer);
+        
+        if (spaceY4Container) {
+          const containerText = Utils.getText(spaceY4Container).trim();
+          // Kiểm tra nếu container chứa text "Hạn sử dụng"
+          if (/Hạn\s+sử\s+dụng/i.test(containerText)) {
+            // Tìm tất cả [data-theme-element="article"] trong container
+            const articleEls = Utils.safeQueryAll('[data-theme-element="article"]', spaceY4Container);
+            
+            // Lấy element cuối cùng (hạn sử dụng thường là element cuối cùng)
+            if (articleEls.length > 0) {
+              // Tìm element cuối cùng có text hợp lệ (không phải label, có nội dung)
+              for (let i = articleEls.length - 1; i >= 0; i--) {
+                const articleEl = articleEls[i];
+                const articleText = Utils.getText(articleEl).trim();
+                // Đảm bảo không phải là label "Hạn sử dụng" và có nội dung
+                if (articleText && !/Hạn\s+sử\s+dụng/i.test(articleText) && articleText.length > 0) {
+                  // Loại bỏ các text không cần thiết như "Sao chép"
+                  shelfLife = articleText.replace(/\s*Sao\s+chép.*/i, '').trim();
+                  if (shelfLife) {
+                    break;
+                  }
+                }
+              }
+            }
+            
+            // Fallback: Nếu không tìm thấy article element, extract trực tiếp từ text
+            if (!shelfLife) {
+              const shelfMatch = containerText.match(/Hạn\s+sử\s+dụng\s+([^\n\r]+?)(?:\s*$|$)/i);
+              if (shelfMatch && shelfMatch[1]) {
+                shelfLife = shelfMatch[1].trim();
+                // Loại bỏ các text không cần thiết nếu có
+                shelfLife = shelfLife.replace(/\s*Sao\s+chép.*/i, '').trim();
+              }
+            }
+          }
+        }
+        
+        // Strategy 2: Fallback - Tìm div.flex có text chứa "Hạn sử dụng" - lấy element cuối cùng
+        if (!shelfLife) {
+          const shelfLifeDivs = Utils.safeQueryAll('div.flex', detailContainer);
+          for (const div of shelfLifeDivs) {
+            const divText = Utils.getText(div).trim();
+            // Kiểm tra nếu div chứa text "Hạn sử dụng" (label)
+            if (/Hạn\s+sử\s+dụng/i.test(divText)) {
+              // Tìm element [data-theme-element="article"] trong toàn bộ subtree của div.flex
+              const articleEls = Utils.safeQueryAll('[data-theme-element="article"]', div);
+              
+              // Lấy element cuối cùng thay vì element đầu tiên
+              if (articleEls.length > 0) {
+                for (let i = articleEls.length - 1; i >= 0; i--) {
+                  const articleEl = articleEls[i];
+                  const articleText = Utils.getText(articleEl).trim();
+                  // Đảm bảo không phải là label "Hạn sử dụng" và có nội dung
+                  if (articleText && !/Hạn\s+sử\s+dụng/i.test(articleText) && articleText.length > 0) {
+                    // Loại bỏ các text không cần thiết như "Sao chép"
+                    shelfLife = articleText.replace(/\s*Sao\s+chép.*/i, '').trim();
+                    if (shelfLife) {
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              // Fallback: Nếu không tìm thấy article element, extract trực tiếp từ text
+              if (!shelfLife) {
+                const shelfMatch = divText.match(/Hạn\s+sử\s+dụng\s+([^\n\r]+?)(?:\s*$|$)/i);
+                if (shelfMatch && shelfMatch[1]) {
+                  shelfLife = shelfMatch[1].trim();
+                  // Loại bỏ các text không cần thiết nếu có
+                  shelfLife = shelfLife.replace(/\s*Sao\s+chép.*/i, '').trim();
+                  if (shelfLife && shelfLife !== 'Hạn sử dụng') {
+                    break;
+                  }
+                }
+              }
+              
+              // Fallback: Tìm div có class text-gray-10 và text-body trong div (lấy element cuối cùng)
+              if (!shelfLife) {
+                const valueDivs = Utils.safeQueryAll('div', div);
+                // Lặp ngược từ cuối lên đầu
+                for (let i = valueDivs.length - 1; i >= 0; i--) {
+                  const valueDiv = valueDivs[i];
+                  const divClass = valueDiv.className || '';
+                  const divTextValue = Utils.getText(valueDiv).trim();
+                  
+                  // Kiểm tra nếu div có class text-gray-10 và text-body và không phải là label
+                  if ((divClass.includes('text-gray-10') && (divClass.includes('text-body') || divClass.includes('text-body1') || divClass.includes('text-body2'))) &&
+                      divTextValue && !/Hạn\s+sử\s+dụng/i.test(divTextValue) && divTextValue.length > 0) {
+                    shelfLife = divTextValue.trim();
+                    break;
+                  }
+                }
+              }
+              
+              if (shelfLife) break;
+            }
+          }
+        }
+        
+        // Strategy 2: Fallback về extractSpecValue
+        if (!shelfLife) {
+          shelfLife = extractSpecValue(/Hạn\s+sử\s+dụng/i, detailContainer, Utils);
+        }
+        if (!shelfLife && specifications['Hạn sử dụng']) {
+          shelfLife = specifications['Hạn sử dụng'].trim();
+        }
+        if (!shelfLife) {
           const shelfLifeMatch = fullText.match(/Hạn\s+sử\s+dụng[:\s]+([^\n\r]+)/i);
           if (shelfLifeMatch) {
-            shelfLife = shelfLifeMatch[1].trim().split(/\s+/)[0];
+            shelfLife = shelfLifeMatch[1].trim();
           }
         }
         
@@ -817,16 +1784,63 @@
         
         // Build link từ URL
         const url = window.location.href || '';
-        const urlMatch = url.match(/\/([^\/]+)\.html$/);
-        const slug = urlMatch ? urlMatch[1] : '';
         const link = slug ? `https://nhathuoclongchau.com.vn/${slug}` : url;
         
         // Build flat structure trước (backward compatibility)
+        // Format price display: nếu không có giá, set thành CONSULT
+        const finalPrice = (price || '').trim();
+        const priceDisplay = finalPrice || 'CONSULT';
+        
+        // Tính priceValue từ finalPrice
+        let priceValue = 0;
+        if (finalPrice) {
+          const priceMatch = finalPrice.match(/(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s*([₫đ])/);
+          if (priceMatch) {
+            const numStr = priceMatch[1].replace(/[.,]/g, '');
+            priceValue = parseInt(numStr, 10) || 0;
+          }
+        }
+        
+        // Build prices array (lịch sử giá hoặc các mức giá khác nhau)
+        // Hiện tại chỉ có current price và original price (nếu có)
+        const prices = [];
+        if (priceInfo.currentPriceValue > 0) {
+          prices.push({
+            price: priceInfo.currentPrice,
+            priceValue: priceInfo.currentPriceValue,
+            priceDisplay: priceDisplay,
+            isCurrent: true,
+            isOriginal: false,
+            discount: priceInfo.discount || 0,
+            discountPercent: priceInfo.discountPercent || 0
+          });
+        }
+        if (priceInfo.originalPriceValue > 0 && priceInfo.originalPriceValue !== priceInfo.currentPriceValue) {
+          prices.push({
+            price: priceInfo.originalPrice,
+            priceValue: priceInfo.originalPriceValue,
+            priceDisplay: priceInfo.originalPrice,
+            isCurrent: false,
+            isOriginal: true,
+            discount: 0,
+            discountPercent: 0
+          });
+        }
+        
         const flatProduct = {
           name: (name || '').trim(),
           sku: (sku || '').trim(),
           brand: (brand || '').trim(),
-          price: (price || '').trim(),
+          price: finalPrice,
+          priceDisplay: priceDisplay,
+          priceValue: priceValue,
+          currentPrice: priceInfo.currentPrice || finalPrice,
+          currentPriceValue: priceInfo.currentPriceValue || priceValue,
+          originalPrice: priceInfo.originalPrice || '',
+          originalPriceValue: priceInfo.originalPriceValue || 0,
+          discount: priceInfo.discount || 0,
+          discountPercent: priceInfo.discountPercent || 0,
+          prices: prices,
           packageSize: (packageSize || '').trim(),
           rating: (rating || '').trim(),
           reviewCount: (reviewCount || '').trim(),
@@ -846,13 +1860,14 @@
           careful: (careful || '').trim(),
           preservation: (preservation || '').trim(),
           // Thông tin bổ sung
-          registrationNumber: (registrationNumber || '').trim(),
           origin: (origin || '').trim(),
           manufacturer: (manufacturer || '').trim(),
           shelfLife: (shelfLife || '').trim(),
           specifications: specifications || {},
           link: link.trim(),
-          slug: slug
+          slug: slug,
+          // Package options (variants) từ DOM
+          packageOptions: Array.isArray(packageOptions) && packageOptions.length > 0 ? packageOptions : []
         };
         
         // Format theo cấu trúc nhóm (database-friendly) nếu có formatter
@@ -1092,6 +2107,136 @@
   // ============================================
   // Export Scraper to window so MessageHandler can access it
   window.DataScraperInstance = Scraper;
+  
+  // ============================================
+  // 🧪 TEST HELPER FUNCTION
+  // ============================================
+  // Helper function để test scrape và download kết quả
+  window.testScrapeDetail = async () => {
+    try {
+      console.log('🧪 Bắt đầu test scrape product detail...');
+      
+      // Chờ một chút để đảm bảo DOM đã load
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      if (!Scraper) {
+        console.error('❌ Scraper không tồn tại!');
+        return null;
+      }
+      
+      const productDetail = await Scraper.scrapeProductDetail(false);
+      
+      if (!productDetail) {
+        console.error('❌ Không thể scrape product detail!');
+        return null;
+      }
+      
+      console.log('✅ Scrape thành công!');
+      console.log('📊 Kết quả:', productDetail);
+      
+      // Format kết quả
+      const formatResult = (data) => {
+        let result = '='.repeat(80) + '\n';
+        result += 'PRODUCT DETAIL SCRAPE RESULT\n';
+        result += '='.repeat(80) + '\n';
+        result += `Timestamp: ${new Date().toISOString()}\n`;
+        result += `URL: ${window.location.href}\n`;
+        result += '\n';
+        
+        if (data.basicInfo) {
+          // Grouped structure
+          result += '--- BASIC INFO ---\n';
+          result += `Name: ${data.basicInfo?.name || 'N/A'}\n`;
+          result += `SKU: ${data.basicInfo?.sku || 'N/A'}\n`;
+          result += `Brand: ${data.basicInfo?.brand || 'N/A'}\n`;
+          result += `Slug: ${data.basicInfo?.slug || 'N/A'}\n`;
+          result += '\n';
+          
+          result += '--- PRICING ---\n';
+          result += `Price: ${data.pricing?.price || 'N/A'}\n`;
+          result += `Price Display: ${data.pricing?.priceDisplay || 'N/A'}\n`;
+          result += `Price Value: ${data.pricing?.priceValue || 0}\n`;
+          result += `Package Size: ${data.pricing?.packageSize || 'N/A'}\n`;
+          result += '\n';
+          
+          if (data.pricing?.packageOptions && data.pricing.packageOptions.length > 0) {
+            result += '--- PACKAGE OPTIONS (VARIANTS) ---\n';
+            data.pricing.packageOptions.forEach((option, index) => {
+              result += `\nOption ${index + 1}:\n`;
+              result += `  Unit: ${option.unit || 'N/A'}\n`;
+              result += `  Unit Display: ${option.unitDisplay || 'N/A'}\n`;
+              result += `  Price: ${option.price || 'N/A'}\n`;
+              result += `  Price Display: ${option.priceDisplay || 'N/A'}\n`;
+              result += `  Price Value: ${option.priceValue || 0}\n`;
+              result += `  Specification: ${option.specification || 'N/A'}\n`;
+              result += `  Is Default: ${option.isDefault ? 'Yes' : 'No'}\n`;
+              result += `  Is Available: ${option.isAvailable ? 'Yes' : 'No'}\n`;
+            });
+            result += '\n';
+          }
+        } else {
+          // Flat structure
+          result += '--- PRODUCT INFO ---\n';
+          result += `Name: ${data.name || 'N/A'}\n`;
+          result += `SKU: ${data.sku || 'N/A'}\n`;
+          result += `Brand: ${data.brand || 'N/A'}\n`;
+          result += `Price: ${data.price || 'N/A'}\n`;
+          result += `Package Size: ${data.packageSize || 'N/A'}\n`;
+          result += '\n';
+          
+          if (data.packageOptions && data.packageOptions.length > 0) {
+            result += '--- PACKAGE OPTIONS (VARIANTS) ---\n';
+            data.packageOptions.forEach((option, index) => {
+              result += `\nOption ${index + 1}:\n`;
+              result += `  Unit: ${option.unit || 'N/A'}\n`;
+              result += `  Unit Display: ${option.unitDisplay || 'N/A'}\n`;
+              result += `  Price: ${option.price || 'N/A'}\n`;
+              result += `  Price Display: ${option.priceDisplay || 'N/A'}\n`;
+              result += `  Price Value: ${option.priceValue || 0}\n`;
+              result += `  Specification: ${option.specification || 'N/A'}\n`;
+              result += `  Is Default: ${option.isDefault ? 'Yes' : 'No'}\n`;
+              result += `  Is Available: ${option.isAvailable ? 'Yes' : 'No'}\n`;
+            });
+            result += '\n';
+          }
+        }
+        
+        result += '='.repeat(80) + '\n';
+        result += 'JSON FORMAT:\n';
+        result += '='.repeat(80) + '\n';
+        result += JSON.stringify(data, null, 2);
+        result += '\n';
+        
+        return result;
+      };
+      
+      const formattedResult = formatResult(productDetail);
+      
+      // Download file
+      const blob = new Blob([formattedResult], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'data.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      console.log('✅ Đã ghi kết quả vào file data.txt!');
+      console.log('📥 File đã được tự động download');
+      console.log('\n' + '='.repeat(80));
+      console.log('KẾT QUẢ SCRAPE:');
+      console.log('='.repeat(80));
+      console.log(formattedResult);
+      
+      return productDetail;
+    } catch (error) {
+      console.error('❌ Lỗi khi test scrape:', error);
+      console.error('Stack trace:', error.stack);
+      return null;
+    }
+  };
 
   // ============================================
   // 📡 USE HANDLERS FROM handlers/ folder

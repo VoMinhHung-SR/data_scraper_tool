@@ -179,7 +179,7 @@
       
       const {
         maxProducts = 100,
-        pageDelay = 2000,
+        pageDelay = 1200, // Optimized: reduced from 2000ms
         maxPages = 20,
         productSelector = null,
         containerSelector = null,
@@ -316,7 +316,7 @@
       
       const {
         maxProducts = 100,
-        scrollDelay = 1000,
+        scrollDelay = 700, // Optimized: reduced from 1000ms
         maxScrolls = 50,
         productSelector = null,
         containerSelector = null,
@@ -380,6 +380,29 @@
               log(`✅ Hoàn thành: ${finalProducts.length} sản phẩm (đã request ${maxProducts})`, '✅');
               
               if (options.requestId) {
+                // Save result to storage for background continuation (if workflow request)
+                const isWorkflow = String(options.requestId).startsWith('workflow_');
+                if (isWorkflow) {
+                  chrome.storage.local.set({
+                    [`workflow_list_result_${options.requestId}`]: finalProducts
+                  }, () => {
+                    // Trigger continuation check after a delay
+                    setTimeout(() => {
+                      chrome.storage.local.get([`workflow_state_${options.requestId}`], (result) => {
+                        if (result[`workflow_state_${options.requestId}`]) {
+                          // Workflow state exists, trigger continuation
+                          chrome.runtime.sendMessage({
+                            action: 'continueWorkflow',
+                            requestId: options.requestId
+                          }).catch(() => {
+                            // Content script might not be ready, that's ok
+                          });
+                        }
+                      });
+                    }, 1000);
+                  });
+                }
+                
                 chrome.runtime.sendMessage({
                   action: 'scrollComplete',
                   requestId: options.requestId,
@@ -488,6 +511,29 @@
               log(`⏹️ Đã scroll tối đa ${maxScrolls} lần. Hoàn thành: ${finalProducts.length}/${maxProducts} sản phẩm`, '⏹️');
               
               if (options.requestId) {
+                // Save result to storage for background continuation (if workflow request)
+                const isWorkflow = String(options.requestId).startsWith('workflow_');
+                if (isWorkflow) {
+                  chrome.storage.local.set({
+                    [`workflow_list_result_${options.requestId}`]: finalProducts
+                  }, () => {
+                    // Trigger continuation check after a delay
+                    setTimeout(() => {
+                      chrome.storage.local.get([`workflow_state_${options.requestId}`], (result) => {
+                        if (result[`workflow_state_${options.requestId}`]) {
+                          // Workflow state exists, trigger continuation
+                          chrome.runtime.sendMessage({
+                            action: 'continueWorkflow',
+                            requestId: options.requestId
+                          }).catch(() => {
+                            // Content script might not be ready, that's ok
+                          });
+                        }
+                      });
+                    }, 1000);
+                  });
+                }
+                
                 chrome.runtime.sendMessage({
                   action: 'scrollComplete',
                   requestId: options.requestId,
@@ -611,7 +657,7 @@
                       lastClickTime = 0;
                       scrapeCurrentProducts();
                     }
-                  }, 800); // Increased delay to 800ms for better reliability
+                  }, document.readyState === 'complete' ? 300 : 500); // Faster when DOM ready
                   return;
                 } catch (e) {
                   isWaitingForContent = false;

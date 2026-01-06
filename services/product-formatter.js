@@ -23,9 +23,15 @@
       }
 
       const pricing = {
-        price: data.pricing?.price || data.price || '',
+        price: data.pricing?.price || data.price || data.currentPrice || '',
         priceDisplay: priceDisplay,
-        priceValue: data.pricing?.priceValue !== undefined ? data.pricing.priceValue : (data.priceValue || 0),
+        priceValue: data.pricing?.priceValue !== undefined ? data.pricing.priceValue : (data.priceValue || data.currentPriceValue || 0),
+        currentPrice: data.pricing?.currentPrice || data.currentPrice || data.price || '',
+        currentPriceValue: data.pricing?.currentPriceValue !== undefined ? data.pricing.currentPriceValue : (data.currentPriceValue || data.priceValue || 0),
+        originalPrice: data.pricing?.originalPrice || data.originalPrice || '',
+        originalPriceValue: data.pricing?.originalPriceValue !== undefined ? data.pricing.originalPriceValue : (data.originalPriceValue || 0),
+        discount: data.pricing?.discount !== undefined ? data.pricing.discount : (data.discount || 0),
+        discountPercent: data.pricing?.discountPercent !== undefined ? data.pricing.discountPercent : (data.discountPercent || 0),
         packageSize: data.pricing?.packageSize || data.packageSize || '',
         prices: Array.isArray(data.pricing?.prices) ? data.pricing.prices : (Array.isArray(data.prices) ? data.prices : []),
         priceObj: data.pricing?.priceObj || data.priceObj || null,

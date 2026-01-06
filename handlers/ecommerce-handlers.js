@@ -5,6 +5,15 @@
   // 🛍️ E-COMMERCE HANDLERS (Custom cho Long Châu/E-commerce)
   // ============================================
   window.DataScraperEcommerceHandlers = {
+    // Flags to prevent multiple modals
+    _formatModalOpen: false,
+    _methodModalOpen: false,
+    _methodModalSelected: false, // Track if method was already selected
+    _scrapeConfigModalOpen: false, // Combined modal flag
+    _formatModalListeners: null,
+    _methodModalListeners: null,
+    _scrapeConfigModalListeners: null,
+
     /**
      * Helper: Validate tab access
      */
@@ -43,7 +52,7 @@
           containerSelector,
           loadMoreSelector,
           useLoadMore: true,
-          scrollDelay: 1000,
+          scrollDelay: 700, // Optimized: reduced from 1000ms
           maxScrolls: 100
         }
       }, window.PopupScrape.handleResponse);
@@ -95,7 +104,7 @@
           productSelector,
           containerSelector,
           nextPageSelector,
-          pageDelay: 2000,
+          pageDelay: 1200, // Optimized: reduced from 2000ms
           maxPages: estimatedPages + 2,
           requestId: requestId
         }
@@ -301,69 +310,202 @@
     /**
      * Handle scrape list AND details in one click
      * Scrapes product list first, then automatically scrapes details from the links
-     * Shows format selection modal before starting
+     * Shows combined modal for method and format selection
      */
     handleScrapeListAndDetails: function(tab) {
-      // Show format selection modal first (chỉ cho manual export)
-      const formatModal = document.getElementById('exportFormatModal');
-      if (formatModal) {
-        // Store tab reference for later use
-        formatModal.dataset.tabId = tab.id;
+      // Prevent multiple modals
+      if (this._scrapeConfigModalOpen) {
+        console.warn('[EcommerceHandlers] Scrape config modal already open, ignoring duplicate click');
+        return;
+      }
+
+      // Show combined modal for method and format selection
+      const configModal = document.getElementById('scrapeConfigModal');
+      if (configModal) {
+        // Check if modal is already visible
+        if (configModal.style.display === 'flex' || configModal.classList.contains('active')) {
+          console.warn('[EcommerceHandlers] Scrape config modal already visible, ignoring duplicate click');
+          return;
+        }
+
+        // Mark modal as open
+        this._scrapeConfigModalOpen = true;
         
-        // Setup format selection handler
-        const confirmBtn = document.getElementById('confirmExportFormat');
-        const cancelBtn = document.getElementById('cancelExportFormat');
-        let selectedFormat = 'csv'; // Default
+        // Setup selections with defaults
+        let selectedMethod = 'pagination'; // Default: pagination
+        let selectedFormat = 'csv'; // Default: csv
         
-        // Remove existing listeners to avoid duplicates
-        const newConfirmBtn = confirmBtn.cloneNode(true);
-        const newCancelBtn = cancelBtn.cloneNode(true);
-        confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
-        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-        
-        // Setup format selection
-        const formatOptions = document.querySelectorAll('#exportFormatModal .modal-option');
-        formatOptions.forEach(option => {
-          option.addEventListener('click', () => {
-            formatOptions.forEach(opt => opt.classList.remove('selected'));
-            option.classList.add('selected');
-            selectedFormat = option.dataset.format || 'csv';
-          });
-        });
-        
-        // Set default selection (CSV)
-        if (formatOptions.length > 0) {
-          formatOptions[0].classList.add('selected');
+        // Clean up old listeners if they exist
+        if (this._scrapeConfigModalListeners) {
+          this._cleanupScrapeConfigModalListeners();
         }
         
-        // Confirm handler
-        newConfirmBtn.addEventListener('click', () => {
-          formatModal.style.display = 'none';
-          // Store selected format for later use
-          chrome.storage.local.set({ manualExportFormat: selectedFormat }, () => {
-            // Continue with scraping
-            this._proceedWithScrapeListAndDetails(tab);
-          });
+        // Store listeners for cleanup
+        this._scrapeConfigModalListeners = {
+          methodOptions: [],
+          formatOptions: [],
+          confirm: null,
+          cancel: null,
+          overlay: null
+        };
+        
+        // Setup method selection
+        const methodOptions = configModal.querySelectorAll('.modal-option[data-method]');
+        const methodClickHandler = (option) => {
+          methodOptions.forEach(opt => opt.classList.remove('selected'));
+          option.classList.add('selected');
+          selectedMethod = option.dataset.method || 'pagination';
+        };
+        
+        methodOptions.forEach(option => {
+          const handler = () => methodClickHandler(option);
+          option.addEventListener('click', handler);
+          this._scrapeConfigModalListeners.methodOptions.push({ element: option, handler });
         });
+        
+        // Set default method selection (Pagination)
+        const defaultMethodOption = configModal.querySelector('.modal-option[data-method="pagination"]');
+        if (defaultMethodOption) {
+          defaultMethodOption.classList.add('selected');
+        } else if (methodOptions.length > 0) {
+          methodOptions[methodOptions.length - 1].classList.add('selected'); // Last one (pagination)
+        }
+        
+        // Setup format selection
+        const formatOptions = configModal.querySelectorAll('.modal-option[data-format]');
+        const formatClickHandler = (option) => {
+          formatOptions.forEach(opt => opt.classList.remove('selected'));
+          option.classList.add('selected');
+          selectedFormat = option.dataset.format || 'csv';
+        };
+        
+        formatOptions.forEach(option => {
+          const handler = () => formatClickHandler(option);
+          option.addEventListener('click', handler);
+          this._scrapeConfigModalListeners.formatOptions.push({ element: option, handler });
+        });
+        
+        // Set default format selection (CSV)
+        const defaultFormatOption = configModal.querySelector('.modal-option[data-format="csv"]');
+        if (defaultFormatOption) {
+          defaultFormatOption.classList.add('selected');
+        } else if (formatOptions.length > 0) {
+          formatOptions[0].classList.add('selected'); // First one (CSV)
+        }
+        
+        const confirmBtn = document.getElementById('scrapeConfigConfirm');
+        const cancelBtn = document.getElementById('scrapeConfigCancel');
+        
+        // Confirm handler
+        const confirmHandler = () => {
+          this._scrapeConfigModalOpen = false;
+          configModal.style.display = 'none';
+          configModal.classList.remove('active');
+          this._cleanupScrapeConfigModalListeners();
+          
+          // Store selected format and proceed with scraping
+          chrome.storage.local.set({ manualExportFormat: selectedFormat }, () => {
+            // Continue with scraping using selected method
+            this._proceedWithScrapeListAndDetails(tab, selectedMethod);
+          });
+        };
         
         // Cancel handler
-        newCancelBtn.addEventListener('click', () => {
-          formatModal.style.display = 'none';
-        });
+        const cancelHandler = () => {
+          this._scrapeConfigModalOpen = false;
+          configModal.style.display = 'none';
+          configModal.classList.remove('active');
+          this._cleanupScrapeConfigModalListeners();
+        };
+        
+        confirmBtn.addEventListener('click', confirmHandler);
+        cancelBtn.addEventListener('click', cancelHandler);
+        this._scrapeConfigModalListeners.confirm = { element: confirmBtn, handler: confirmHandler };
+        this._scrapeConfigModalListeners.cancel = { element: cancelBtn, handler: cancelHandler };
+        
+        // Close on overlay click
+        const overlayClickHandler = (e) => {
+          if (e.target === configModal) {
+            cancelHandler();
+          }
+        };
+        configModal.addEventListener('click', overlayClickHandler);
+        this._scrapeConfigModalListeners.overlay = { element: configModal, handler: overlayClickHandler };
         
         // Show modal
-        formatModal.style.display = 'flex';
-        return; // Stop here, will continue after format selection
+        configModal.style.display = 'flex';
+        configModal.classList.add('active');
+        return; // Stop here, will continue after selection
       }
       
       // Fallback: proceed without modal if modal not found
-      this._proceedWithScrapeListAndDetails(tab);
+      this._proceedWithScrapeListAndDetails(tab, 'pagination');
+    },
+
+    /**
+     * Clean up format modal listeners
+     */
+    _cleanupFormatModalListeners: function() {
+      if (!this._formatModalListeners) return;
+      
+      // Remove format option listeners
+      if (this._formatModalListeners.formatOptions) {
+        this._formatModalListeners.formatOptions.forEach(({ element, handler }) => {
+          element.removeEventListener('click', handler);
+        });
+      }
+      
+      // Remove button listeners
+      if (this._formatModalListeners.confirm) {
+        this._formatModalListeners.confirm.element.removeEventListener('click', this._formatModalListeners.confirm.handler);
+      }
+      if (this._formatModalListeners.cancel) {
+        this._formatModalListeners.cancel.element.removeEventListener('click', this._formatModalListeners.cancel.handler);
+      }
+      
+      this._formatModalListeners = null;
     },
     
     /**
+     * Clean up scrape config modal listeners
+     */
+    _cleanupScrapeConfigModalListeners: function() {
+      if (!this._scrapeConfigModalListeners) return;
+      
+      // Remove method option listeners
+      if (this._scrapeConfigModalListeners.methodOptions) {
+        this._scrapeConfigModalListeners.methodOptions.forEach(({ element, handler }) => {
+          element.removeEventListener('click', handler);
+        });
+      }
+      
+      // Remove format option listeners
+      if (this._scrapeConfigModalListeners.formatOptions) {
+        this._scrapeConfigModalListeners.formatOptions.forEach(({ element, handler }) => {
+          element.removeEventListener('click', handler);
+        });
+      }
+      
+      // Remove button listeners
+      if (this._scrapeConfigModalListeners.confirm) {
+        this._scrapeConfigModalListeners.confirm.element.removeEventListener('click', this._scrapeConfigModalListeners.confirm.handler);
+      }
+      if (this._scrapeConfigModalListeners.cancel) {
+        this._scrapeConfigModalListeners.cancel.element.removeEventListener('click', this._scrapeConfigModalListeners.cancel.handler);
+      }
+      
+      // Remove overlay listener
+      if (this._scrapeConfigModalListeners.overlay) {
+        this._scrapeConfigModalListeners.overlay.element.removeEventListener('click', this._scrapeConfigModalListeners.overlay.handler);
+      }
+      
+      this._scrapeConfigModalListeners = null;
+    },
+
+    /**
      * Internal function to proceed with scrape list and details
      */
-    _proceedWithScrapeListAndDetails: function(tab) {
+    _proceedWithScrapeListAndDetails: function(tab, method = 'pagination') {
       if (!this._validateTab(tab)) return;
 
       // Fix: Clear any existing state first to prevent stuck listeners
@@ -433,201 +575,128 @@
           }
         }
         
-        proceedWithScrapingInternal(skipProducts, maxProducts);
+        // Method will be passed from handleScrapeListAndDetails
+        proceedWithScrapingInternal(skipProducts, maxProducts, method);
       });
       
-      function proceedWithScrapingInternal(actualSkip, actualLimit) {
-        // Show custom modal to choose method
-        const modal = document.getElementById('methodModal');
-      if (!modal) {
-        // Fallback to confirm
-        const method = confirm(
-          `Chọn phương thức scrape list:\n\n` +
-          `OK = Scroll\n` +
-          `Cancel = Pagination`
-        ) ? 'scroll' : 'pagination';
-        proceedWithScraping(method);
-        return;
-      }
+      function proceedWithScrapingInternal(actualSkip, actualLimit, selectedMethod = 'pagination') {
+        // Method is already selected from combined modal, proceed directly
+        // Define proceedWithScraping function inside this scope
+        function proceedWithScraping(method) {
+          // Kiểm tra module workflow có sẵn không
+          if (!window.DataScraperWorkflow) {
+            window.PopupDisplay.showMessage('Module workflow chưa được load. Vui lòng reload extension.', 'error');
+            return;
+          }
 
-      const options = modal.querySelectorAll('.modal-option');
-      const confirmBtn = document.getElementById('modalConfirm');
-      const cancelBtn = document.getElementById('modalCancel');
-      
-      if (!options.length || !confirmBtn || !cancelBtn) {
-        // Fallback to confirm
-        const method = confirm(
-          `Chọn phương thức scrape list:\n\n` +
-          `OK = Scroll\n` +
-          `Cancel = Pagination`
-        ) ? 'scroll' : 'pagination';
-        proceedWithScraping(method);
-        return;
-      }
+          const forceAPIInput = document.getElementById('forceAPIScraping');
+          const forceAPI = forceAPIInput ? forceAPIInput.checked : false;
 
-      let selectedMethod = 'scroll'; // Default
+          // Hiển thị processing status
+          const processingStatus = document.getElementById('processingStatus');
+          const processingText = document.getElementById('processingText');
+          if (processingStatus) {
+            processingStatus.style.display = 'block';
+          }
 
-      // Reset selection
-      options.forEach(opt => opt.classList.remove('selected'));
-      if (options[0]) {
-        options[0].classList.add('selected');
-      }
-
-      // Option click handler
-      const optionClickHandler = (option) => {
-        options.forEach(opt => opt.classList.remove('selected'));
-        option.classList.add('selected');
-        selectedMethod = option.dataset.method;
-      };
-
-      options.forEach(option => {
-        option.addEventListener('click', () => optionClickHandler(option));
-      });
-
-      // Show modal
-      modal.style.display = 'flex';
-      modal.classList.add('active');
-      
-      // Force show (in case CSS doesn't work)
-      setTimeout(() => {
-        const computed = window.getComputedStyle(modal);
-        if (computed.display === 'none') {
-          modal.style.display = 'flex';
-          modal.style.visibility = 'visible';
-          modal.style.opacity = '1';
-        }
-      }, 100);
-
-      // Confirm handler
-      const handleConfirm = () => {
-        modal.classList.remove('active');
-        modal.style.display = 'none';
-        confirmBtn.removeEventListener('click', handleConfirm);
-        cancelBtn.removeEventListener('click', handleCancel);
-        options.forEach(opt => {
-          opt.removeEventListener('click', () => {});
-        });
-        
-        // Continue with selected method
-        proceedWithScraping(selectedMethod);
-      };
-
-      // Cancel handler
-      const handleCancel = () => {
-        modal.classList.remove('active');
-        modal.style.display = 'none';
-        confirmBtn.removeEventListener('click', handleConfirm);
-        cancelBtn.removeEventListener('click', handleCancel);
-        options.forEach(opt => {
-          opt.removeEventListener('click', () => {});
-        });
-      };
-
-      confirmBtn.addEventListener('click', handleConfirm);
-      cancelBtn.addEventListener('click', handleCancel);
-
-      // Close on overlay click
-      const overlayClickHandler = (e) => {
-        if (e.target === modal) {
-          handleCancel();
-        }
-      };
-      modal.addEventListener('click', overlayClickHandler);
-
-      function proceedWithScraping(method) {
-        // Kiểm tra module workflow có sẵn không
-        if (!window.DataScraperWorkflow) {
-          window.PopupDisplay.showMessage('Module workflow chưa được load. Vui lòng reload extension.', 'error');
-          return;
-        }
-
-        const forceAPIInput = document.getElementById('forceAPIScraping');
-        const forceAPI = forceAPIInput ? forceAPIInput.checked : false;
-
-        // Hiển thị processing status
-        const processingStatus = document.getElementById('processingStatus');
-        const processingText = document.getElementById('processingText');
-        if (processingStatus) {
-          processingStatus.style.display = 'block';
-        }
-
-        // Sử dụng module workflow mới
-        window.DataScraperWorkflow.scrapeListAndDetails({
-          skip: actualSkip,
-          limit: actualLimit,
-          method: method,
-          productSelector: productSelector,
-          containerSelector: containerSelector,
-          loadMoreSelector: loadMoreSelector,
-          nextPageSelector: nextPageSelector,
-          forceAPI: forceAPI,
-          onProgress: (progressData) => {
-            // Update progress
-            if (processingText) {
-              processingText.textContent = progressData.message || 'Đang xử lý...';
-            }
-            
-            if (progressData.step === 'loading_list') {
-              window.PopupDisplay.showMessage(
-                `🚀 Bước 1/2: ${progressData.message}`,
-                'loading'
-              );
-            } else if (progressData.step === 'scraping_details') {
-              window.PopupDisplay.showMessage(
-                `🔍 Bước 2/2: ${progressData.message}`,
-                'loading'
-              );
-            }
-          },
-          onComplete: (result) => {
-            // Hide processing status
-            if (processingStatus) {
-              processingStatus.style.display = 'none';
-            }
-
-            // Set data và display results
-            window.PopupState.setDetailData(result.details);
-            window.PopupDisplay.displayResults(result.details, { 
-              maxProducts: result.expectedDetailCount 
-            });
-
-            // Check if this is manual export (1click) - use selected format
-            // Auto-export is handled in content.js, not here
-            chrome.storage.local.get(['manualExportFormat'], (storageResult) => {
-              const manualFormat = storageResult.manualExportFormat;
+          // Sử dụng module workflow mới
+          window.DataScraperWorkflow.scrapeListAndDetails({
+            skip: actualSkip,
+            limit: actualLimit,
+            method: method,
+            productSelector: productSelector,
+            containerSelector: containerSelector,
+            loadMoreSelector: loadMoreSelector,
+            nextPageSelector: nextPageSelector,
+            forceAPI: forceAPI,
+            onProgress: (progressData) => {
+              // Update progress
+              if (processingText) {
+                processingText.textContent = progressData.message || 'Đang xử lý...';
+              }
               
-              // Only export manually if format was selected (from 1click button)
-              if (manualFormat && result.details && result.details.length > 0) {
-                // Clear manual format after use
-                chrome.storage.local.remove(['manualExportFormat'], () => {
+              if (progressData.step === 'loading_list') {
+                window.PopupDisplay.showMessage(
+                  `🚀 Bước 1/2: ${progressData.message}`,
+                  'loading'
+                );
+              } else if (progressData.step === 'scraping_details') {
+                window.PopupDisplay.showMessage(
+                  `🔍 Bước 2/2: ${progressData.message}`,
+                  'loading'
+                );
+              }
+            },
+            onComplete: (result) => {
+              // Hide processing status
+              if (processingStatus) {
+                processingStatus.style.display = 'none';
+              }
+
+              // Set data và display results
+              window.PopupState.setDetailData(result.details);
+              window.PopupDisplay.displayResults(result.details, { 
+                maxProducts: result.expectedDetailCount 
+              });
+
+              // Check if this is manual export (1click) - use selected format
+              // Auto-export is handled in content.js, not here
+              chrome.storage.local.get(['manualExportFormat'], (storageResult) => {
+                const manualFormat = storageResult.manualExportFormat;
+                
+                // Only export manually if format was selected (from 1click button)
+                if (manualFormat && result.details && result.details.length > 0) {
                   // Export with selected format (no modal, format already chosen)
                   window.DataScraperExportHandler.exportData(manualFormat, result.details);
-                });
+                }
+              });
+            },
+            onError: (error) => {
+              // Hide processing status
+              if (processingStatus) {
+                processingStatus.style.display = 'none';
               }
-            });
-
-            // Show success message
-            const autoExportMsg = autoExportCheckbox?.checked ? ' (đang tự động export...)' : '';
-            window.PopupDisplay.showMessage(
-              `✅ Đã scrape thành công ${result.detailCount}/${result.expectedDetailCount} sản phẩm${autoExportMsg}\n` +
-              `📊 Tổng số sản phẩm trong list: ${result.listCount}`,
-              'success'
-            );
-          },
-          onError: (error) => {
-            // Hide processing status
-            if (processingStatus) {
-              processingStatus.style.display = 'none';
+              
+              window.PopupDisplay.showMessage(
+                `Lỗi: ${error.message || 'Không thể scrape dữ liệu'}`,
+                'error'
+              );
             }
+          });
+        }
+        
+        // Use the method passed from modal (or default pagination)
+        proceedWithScraping(selectedMethod);
+      }
+    },
 
-            window.PopupDisplay.showMessage(
-              `❌ Lỗi: ${error.message || 'Unknown error'}`,
-              'error'
-            );
-          }
+    /**
+     * Clean up method modal listeners
+     */
+    _cleanupMethodModalListeners: function() {
+      if (!this._methodModalListeners) return;
+      
+      // Remove option listeners
+      if (this._methodModalListeners.options) {
+        this._methodModalListeners.options.forEach(({ element, handler }) => {
+          element.removeEventListener('click', handler);
         });
       }
+      
+      // Remove button listeners
+      if (this._methodModalListeners.confirm) {
+        this._methodModalListeners.confirm.element.removeEventListener('click', this._methodModalListeners.confirm.handler);
       }
+      if (this._methodModalListeners.cancel) {
+        this._methodModalListeners.cancel.element.removeEventListener('click', this._methodModalListeners.cancel.handler);
+      }
+      
+      // Remove overlay listener
+      if (this._methodModalListeners.overlay) {
+        this._methodModalListeners.overlay.element.removeEventListener('click', this._methodModalListeners.overlay.handler);
+      }
+      
+      this._methodModalListeners = null;
     }
   };
 })();

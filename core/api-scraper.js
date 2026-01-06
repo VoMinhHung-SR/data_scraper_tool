@@ -441,6 +441,119 @@
       
       const ProductFormatter = window.DataScraperProductFormatter;
       return ProductFormatter ? ProductFormatter.formatProductDetail(flatProduct) : flatProduct;
+    },
+
+    /**
+     * Format API products from raw API response
+     */
+    formatAPIProducts: (data) => {
+      const API = window.DataScraperAPI;
+      const products = API.parseResponse(data);
+      return products
+        .filter(p => p?.sku)
+        .map(p => API.formatProduct(p))
+        .filter(p => p !== null);
+    },
+
+    /**
+     * Scrape từ API (intercept fetch hoặc tìm trong window)
+     */
+    scrapeFromAPI: async (options = {}) => {
+      const { apiUrl = null, maxProducts = 100, interceptMode = true } = options;
+      const API = window.DataScraperAPI;
+
+      return new Promise((resolve) => {
+        try {
+          if (apiUrl) {
+            fetch(apiUrl)
+              .then(response => response.json())
+              .then(data => {
+                const products = API.formatAPIProducts(data);
+                resolve(products.slice(0, maxProducts));
+              })
+              .catch(error => {
+                resolve([]);
+              });
+            return;
+          }
+
+          if (interceptMode) {
+            const originalFetch = window.fetch;
+            const apiProducts = [];
+
+            window.fetch = function(...args) {
+              const url = args[0];
+              
+              if (typeof url === 'string' && (
+                (url.includes('/api/') && url.includes('product')) ||
+                url.includes('productlist') ||
+                (url.includes('search') && url.includes('product'))
+              )) {
+                
+                return originalFetch.apply(this, args)
+                  .then(response => {
+                    const clonedResponse = response.clone();
+                    clonedResponse.json().then(data => {
+                      const products = Array.isArray(data) ? data : (data.data || []);
+                      products.forEach(product => {
+                        if (product.sku || product.name) {
+                          apiProducts.push(product);
+                        }
+                      });
+                    }).catch(() => {});
+                    return response;
+                  });
+              }
+              
+              return originalFetch.apply(this, args);
+            };
+
+            setTimeout(() => {
+              window.fetch = originalFetch;
+              if (apiProducts.length > 0) {
+                const formatted = apiProducts.map(p => API?.formatProduct(p)).filter(p => p);
+                resolve(formatted.slice(0, maxProducts));
+              } else {
+                API.findAPIInWindow(resolve, maxProducts);
+              }
+            }, 3000);
+          } else {
+            API.findAPIInWindow(resolve, maxProducts);
+          }
+        } catch (error) {
+          resolve([]);
+        }
+      });
+    },
+
+    /**
+     * Tìm API data trong window (fallback)
+     */
+    findAPIInWindow: (resolve, maxProducts) => {
+      const API = window.DataScraperAPI;
+      try {
+        const possibleKeys = ['__NEXT_DATA__', 'window.__INITIAL_STATE__', 'window.products', 'window.productList'];
+        
+        for (const key of possibleKeys) {
+          try {
+            const data = eval(key);
+            if (data && (Array.isArray(data) || (data.products && Array.isArray(data.products)))) {
+              const products = Array.isArray(data) ? data : data.products;
+              if (products.length > 0) {
+                const formatted = products.map(p => API?.formatProduct(p)).filter(p => p);
+                resolve(formatted.slice(0, maxProducts));
+                return;
+              }
+            }
+          } catch (e) {
+            // Skip
+          }
+        }
+        
+        resolve([]);
+      } catch (error) {
+        resolve([]);
+      }
     }
   };
 })();

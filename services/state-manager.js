@@ -145,6 +145,12 @@
      */
     set: (key, value) => {
       return new Promise((resolve) => {
+        // Validate key to prevent undefined key
+        if (!key || typeof key !== 'string' || key.trim() === '') {
+          console.error('[StateManager] Invalid key provided to set():', key);
+          resolve();
+          return;
+        }
         chrome.storage.local.set({ [key]: value }, () => {
           resolve();
         });

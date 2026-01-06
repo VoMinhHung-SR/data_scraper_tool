@@ -10,9 +10,14 @@
     "price": "string",
     "priceDisplay": "string",
     "priceValue": "number",
+    "currentPrice": "string",
+    "currentPriceValue": "number",
+    "originalPrice": "string",
+    "originalPriceValue": "number",
+    "discount": "number",
+    "discountPercent": "number",
     "packageSize": "string",
     "prices": "array",
-    "priceObj": "object|null",
     "packageOptions": [
       {
         "unit": "string",
@@ -20,6 +25,10 @@
         "price": "string",
         "priceDisplay": "string",
         "priceValue": "number",
+        "originalPrice": "string",
+        "originalPriceValue": "number",
+        "discount": "number",
+        "discountPercent": "number",
         "specification": "string",
         "isDefault": "boolean",
         "isAvailable": "boolean",
@@ -55,16 +64,12 @@
     "preservation": "string"
   },
   "specifications": {
-    "registrationNumber": "string",
     "origin": "string",
     "manufacturer": "string",
     "shelfLife": "string",
     "specifications": "object"
   },
   "metadata": {
-    "link": "string",
-    "productRanking": "number",
-    "displayCode": "number",
-    "isPublish": "boolean"
+    "link": "string"
   }
 }

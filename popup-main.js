@@ -128,9 +128,15 @@
           if (savedDetailData && Array.isArray(savedDetailData) && savedDetailData.length > 0) {
             const totalItems = savedDetailData.length;
             
-            // Check if export was already done (by checking if exportCompleteModal was shown)
-            chrome.storage.local.get(['exportCompleted'], (exportCheck) => {
-              if (exportCheck.exportCompleted) {
+            // Check if export was already done or auto-export is in progress
+            chrome.storage.local.get(['exportCompleted', 'currentExportBatch', 'autoExportEnabled'], (exportCheck) => {
+              const isAutoExportEnabled = exportCheck.autoExportEnabled !== false; // Default true
+              const isExportCompleted = exportCheck.exportCompleted === true;
+              const isAutoExportInProgress = exportCheck.currentExportBatch !== undefined;
+              
+              // If auto-export is enabled and > 100 items, auto-export should have been triggered
+              // Don't export again if already completed or in progress
+              if (isExportCompleted || (isAutoExportEnabled && totalItems > 100 && isAutoExportInProgress)) {
                 // Clear badge tick xanh khi export đã hoàn thành
                 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
                   if (tabs && tabs.length > 0 && tabs[0].id) {
@@ -140,12 +146,25 @@
                     });
                   }
                 });
-                // Already exported, just show success message
+                // Already exported or auto-exporting, just show success message
+                window.PopupDisplay.displayResults(savedDetailData, { 
+                  maxProducts: savedDetailData.length 
+                });
+                const message = isAutoExportInProgress 
+                  ? `✅ Đã scrape ${totalItems} sản phẩm. Đang tự động export...`
+                  : `✅ Đã scrape và export thành công ${totalItems} sản phẩm. Hoàn tất!`;
+                window.PopupDisplay.showMessage(message, 'success');
+                return;
+              }
+              
+              // If auto-export is enabled and > 100 items, don't trigger manual export
+              // Auto-export should have been triggered from content.js
+              if (isAutoExportEnabled && totalItems > 100) {
                 window.PopupDisplay.displayResults(savedDetailData, { 
                   maxProducts: savedDetailData.length 
                 });
                 window.PopupDisplay.showMessage(
-                  `✅ Đã scrape và export thành công ${totalItems} sản phẩm. Hoàn tất!`, 
+                  `✅ Đã scrape ${totalItems} sản phẩm. Auto-export đang chạy...`, 
                   'success'
                 );
                 return;
@@ -341,17 +360,37 @@
       });
     }
 
-    // Auto-check and disable export checkbox when maxProducts > 100
+    // Auto-check export checkbox when maxProducts > 100 (but allow check/uncheck if <= 100)
     const maxProductsInput = document.getElementById('maxProducts');
     const autoExportCheckbox = document.getElementById('autoExportCSV');
     if (maxProductsInput && autoExportCheckbox) {
+      let preventUncheckHandler = null;
+      
       const updateCheckboxState = () => {
         const value = parseInt(maxProductsInput.value) || 0;
+        
+        // Remove previous prevent handler if exists
+        if (preventUncheckHandler) {
+          autoExportCheckbox.removeEventListener('click', preventUncheckHandler);
+          preventUncheckHandler = null;
+        }
+        
         if (value > 100) {
+          // Auto-check if > 100
           autoExportCheckbox.checked = true;
-          autoExportCheckbox.disabled = true;
           // Save auto-export state to storage
           chrome.storage.local.set({ autoExportEnabled: true });
+          
+          // Prevent uncheck when > 100
+          preventUncheckHandler = (e) => {
+            if (!autoExportCheckbox.checked) {
+              // If trying to uncheck, prevent it and keep checked
+              e.preventDefault();
+              autoExportCheckbox.checked = true;
+            }
+          };
+          autoExportCheckbox.addEventListener('click', preventUncheckHandler);
+          
           // Update label to show it's auto-enabled
           const label = autoExportCheckbox.closest('label');
           if (label) {
@@ -362,9 +401,10 @@
             }
           }
         } else {
-          autoExportCheckbox.disabled = false;
+          // Allow check/uncheck freely if <= 100
           // Save auto-export state to storage
           chrome.storage.local.set({ autoExportEnabled: autoExportCheckbox.checked });
+          
           // Reset label style
           const label = autoExportCheckbox.closest('label');
           if (label) {
@@ -379,7 +419,11 @@
       
       // Listen to checkbox changes
       autoExportCheckbox.addEventListener('change', () => {
-        chrome.storage.local.set({ autoExportEnabled: autoExportCheckbox.checked });
+        const value = parseInt(maxProductsInput.value) || 0;
+        // Only save if <= 100 (if > 100, it's always true)
+        if (value <= 100) {
+          chrome.storage.local.set({ autoExportEnabled: autoExportCheckbox.checked });
+        }
       });
       
       // Check on load

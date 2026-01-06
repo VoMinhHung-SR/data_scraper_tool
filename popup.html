@@ -7,37 +7,63 @@
   <link rel="stylesheet" href="styles/popup.css">
 </head>
 <body>
-  <!-- Custom Modal for Method Selection -->
-  <div class="modal-overlay" id="methodModal">
-    <div class="modal">
+  <!-- Combined Modal for Method Selection and Format Selection -->
+  <div class="modal-overlay" id="scrapeConfigModal" style="display: none;">
+    <div class="modal" style="max-width: 500px; max-height: 90vh;">
       <div class="modal-header">
         <span>🚀</span>
-        <h3>Chọn phương thức scrape</h3>
+        <h3>Cấu hình scrape</h3>
       </div>
-      <div class="modal-body">
-        <p>Vui lòng chọn phương thức để scrape danh sách sản phẩm:</p>
-        <div class="modal-options">
-          <div class="modal-option" data-method="scroll">
-            <div class="modal-option-icon">📊</div>
-            <div class="modal-option-content">
-              <div class="modal-option-title">Scroll</div>
-              <div class="modal-option-desc">Tự động scroll và click nút "Xem thêm" để load thêm sản phẩm</div>
+      <div class="modal-body" style="max-height: calc(90vh - 140px); overflow-y: auto;">
+        <!-- Method Selection Section -->
+        <div style="margin-bottom: 20px;">
+          <p style="margin-bottom: 8px; font-weight: 600; font-size: 13px;">Phương thức scrape:</p>
+          <div class="modal-options">
+            <div class="modal-option" data-method="scroll">
+              <div class="modal-option-icon">📊</div>
+              <div class="modal-option-content">
+                <div class="modal-option-title">Scroll</div>
+                <div class="modal-option-desc">Tự động scroll và click nút "Xem thêm" để load thêm sản phẩm</div>
+              </div>
+              <div class="modal-option-check">✓</div>
             </div>
-            <div class="modal-option-check">✓</div>
+            <div class="modal-option" data-method="pagination">
+              <div class="modal-option-icon">📄</div>
+              <div class="modal-option-content">
+                <div class="modal-option-title">Pagination</div>
+                <div class="modal-option-desc">Tự động chuyển trang bằng nút "Trang sau" hoặc số trang</div>
+              </div>
+              <div class="modal-option-check">✓</div>
+            </div>
           </div>
-          <div class="modal-option" data-method="pagination">
-            <div class="modal-option-icon">📄</div>
-            <div class="modal-option-content">
-              <div class="modal-option-title">Pagination</div>
-              <div class="modal-option-desc">Tự động chuyển trang bằng nút "Trang sau" hoặc số trang</div>
+        </div>
+        
+        <!-- Format Selection Section -->
+        <div>
+          <p style="margin-bottom: 8px; font-weight: 600; font-size: 13px;">Định dạng export:</p>
+          <div class="modal-options">
+            <div class="modal-option" data-format="csv">
+              <div class="modal-option-icon">📄</div>
+              <div class="modal-option-content">
+                <div class="modal-option-title">CSV (Mặc định)</div>
+                <div class="modal-option-desc">Định dạng bảng tính, dễ mở bằng Excel</div>
+              </div>
+              <div class="modal-option-check">✓</div>
             </div>
-            <div class="modal-option-check">✓</div>
+            <div class="modal-option" data-format="json">
+              <div class="modal-option-icon">💾</div>
+              <div class="modal-option-content">
+                <div class="modal-option-title">JSON</div>
+                <div class="modal-option-desc">Định dạng dữ liệu có cấu trúc, dễ xử lý</div>
+              </div>
+              <div class="modal-option-check">✓</div>
+            </div>
           </div>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="modal-btn modal-btn-cancel" id="modalCancel">Hủy</button>
-        <button class="modal-btn modal-btn-confirm" id="modalConfirm">Tiếp tục</button>
+        <button class="modal-btn modal-btn-cancel" id="scrapeConfigCancel">Hủy</button>
+        <button class="modal-btn modal-btn-confirm" id="scrapeConfigConfirm">Tiếp tục</button>
       </div>
     </div>
   </div>
@@ -77,7 +103,7 @@
       </div>
     </div>
 
-    <!-- Export Format Selection Modal -->
+    <!-- Export Format Selection Modal (kept for backward compatibility with other export flows) -->
     <div class="modal-overlay" id="exportFormatModal" style="display: none;">
       <div class="modal" style="max-width: 400px;">
         <div class="modal-header">

@@ -147,14 +147,43 @@
         // Sử dụng maxProducts được truyền vào (skip + limit)
 
         const requestId = 'workflow_' + Date.now().toString();
+        
+        // Save workflow state to storage so content script can continue even if popup closes
+        // This allows background scraping without keeping popup open
+        chrome.storage.local.set({
+          [`workflow_state_${requestId}`]: {
+            skip: options.skip || 0,
+            limit: options.limit || 100,
+            forceAPI: options.forceAPI || false,
+            requestId: requestId,
+            timestamp: Date.now()
+          }
+        });
 
-        // Listen for completion
+        // Listen for completion (but also save to storage for background continuation)
         const messageListener = (message, sender, sendResponse) => {
           if ((message?.action === 'paginationComplete' || message?.action === 'scrollComplete') &&
               message?.requestId === requestId) {
             chrome.runtime.onMessage.removeListener(messageListener);
             
             const products = message.data || [];
+            
+            // Save list result to storage for background continuation
+            chrome.storage.local.set({
+              [`workflow_list_result_${requestId}`]: products
+            }, () => {
+              // Trigger content script to continue workflow if popup is closed
+              chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs && tabs.length > 0) {
+                  chrome.tabs.sendMessage(tabs[0].id, {
+                    action: 'continueWorkflow',
+                    requestId: requestId
+                  }).catch(() => {
+                    // Content script might not be ready, that's ok
+                  });
+                }
+              });
+            });
             
             if (onProgress) {
               onProgress({
@@ -182,7 +211,8 @@
         if (method === 'scroll') {
           scrapeOptions.loadMoreSelector = loadMoreSelector;
           scrapeOptions.useLoadMore = true;
-          scrapeOptions.scrollDelay = 1000;
+          // Optimized delay: faster when DOM is ready
+          scrapeOptions.scrollDelay = 700; // Reduced from 1000ms
           // Tính số scrolls cần thiết dựa trên maxProducts
           // Thực tế mỗi scroll chỉ load ~8-12 items (không phải 15-20)
           // Ước tính an toàn: 8 items/scroll, buffer 40 để đảm bảo scrape đủ
@@ -191,7 +221,8 @@
           scrapeOptions.maxScrolls = Math.ceil(maxProducts / itemsPerScroll) + buffer;
         } else {
           scrapeOptions.nextPageSelector = nextPageSelector;
-          scrapeOptions.pageDelay = 2000;
+          // Optimized delay: faster when DOM is ready
+          scrapeOptions.pageDelay = 1200; // Reduced from 2000ms
           // Tính số pages cần thiết dựa trên maxProducts (ước tính mỗi page ~20-30 sản phẩm)
           scrapeOptions.maxPages = Math.ceil(maxProducts / 20) + 2; // Thêm buffer
         }

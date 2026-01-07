@@ -778,6 +778,9 @@
             return false; // no retry, move on
           };
 
+          // Track if price is CONSULT (needs delay before navigation)
+          let isConsultPrice = false;
+
           try {
             // Check if forceAPI is set in state
             const forceAPI = state.forceAPI || false;
@@ -794,6 +797,12 @@
             const detail = await window.DataScraperDetailScraper.scrapeProductDetail(forceAPI);
             
             if (detail) {
+              // Check if price is CONSULT (supports both flat and grouped structure)
+              const priceDisplay = detail.priceDisplay || detail.price || 
+                                   (detail.pricing && detail.pricing.priceDisplay) || 
+                                   (detail.pricing && detail.pricing.price) || '';
+              isConsultPrice = priceDisplay && priceDisplay.toString().toUpperCase().includes('CONSULT');
+              
               // Ensure details array exists
               if (!Array.isArray(state.details)) {
                 state.details = [];
@@ -964,19 +973,39 @@
             : (nextLinkItem?.link || nextLinkItem?.url);
           
           if (nextLink && typeof nextLink === 'string' && nextLink.trim() !== '') {
-            chrome.storage.local.set({ scrapeDetailsState: state }, () => {
-              if (chrome.runtime.lastError) {
-                console.error('[Content] Error saving state before navigation:', chrome.runtime.lastError);
-                return;
-              }
-              try {
-                // Navigate to next product - page load sẽ được handle bởi window.onload listener
-                window.location.href = nextLink;
-              } catch (e) {
-                console.error('[Content] Error navigating to next link:', e);
-                chrome.storage.local.remove(['scrapeDetailsState']);
-              }
-            });
+            // Add delay 2s if price is CONSULT to avoid traffic overload
+            if (isConsultPrice) {
+              setTimeout(() => {
+                chrome.storage.local.set({ scrapeDetailsState: state }, () => {
+                  if (chrome.runtime.lastError) {
+                    console.error('[Content] Error saving state before navigation:', chrome.runtime.lastError);
+                    return;
+                  }
+                  try {
+                    // Navigate to next product - page load sẽ được handle bởi window.onload listener
+                    window.location.href = nextLink;
+                  } catch (e) {
+                    console.error('[Content] Error navigating to next link:', e);
+                    chrome.storage.local.remove(['scrapeDetailsState']);
+                  }
+                });
+              }, 2000); // 2 second delay when price is CONSULT to avoid traffic overload
+            } else {
+              // Normal navigation when price is not CONSULT - no delay needed
+              chrome.storage.local.set({ scrapeDetailsState: state }, () => {
+                if (chrome.runtime.lastError) {
+                  console.error('[Content] Error saving state before navigation:', chrome.runtime.lastError);
+                  return;
+                }
+                try {
+                  // Navigate to next product - page load sẽ được handle bởi window.onload listener
+                  window.location.href = nextLink;
+                } catch (e) {
+                  console.error('[Content] Error navigating to next link:', e);
+                  chrome.storage.local.remove(['scrapeDetailsState']);
+                }
+              });
+            }
           } else {
             chrome.storage.local.remove(['scrapeDetailsState']);
             

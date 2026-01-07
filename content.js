@@ -546,59 +546,15 @@
   // 📡 MAIN MESSAGE LISTENER
   // ============================================
   // Helper function to continue workflow from storage (background scraping)
+  // Optimized: This function is no longer needed since we don't save list to storage
+  // Workflow now slices and scrapes details directly without storing the full list
   const continueWorkflowFromStorage = (requestId) => {
-    chrome.storage.local.get([
+    console.log('[Content] continueWorkflowFromStorage is deprecated - workflow now handles slicing directly without storage');
+    // Clean up workflow state since we can't continue without the list
+    chrome.storage.local.remove([
       `workflow_state_${requestId}`,
       `workflow_list_result_${requestId}`
-    ], (result) => {
-      const workflowState = result[`workflow_state_${requestId}`];
-      const listResult = result[`workflow_list_result_${requestId}`];
-      
-      if (!workflowState || !listResult) {
-        console.log('[Content] Workflow state or list result not found, skipping continuation');
-        return;
-      }
-      
-      // Extract links and apply skip/limit
-      const allProductLinks = listResult
-        .map(p => p.link || p.url || p.href)
-        .filter(link => link && link.includes('.html'));
-      
-      const skip = workflowState.skip || 0;
-      const limit = workflowState.limit || 100;
-      const startIndex = skip;
-      const endIndex = skip + limit;
-      const productLinks = allProductLinks.slice(startIndex, endIndex);
-      
-      if (productLinks.length === 0) {
-        console.log('[Content] No product links after skip/limit, workflow complete');
-        // Clean up
-        chrome.storage.local.remove([
-          `workflow_state_${requestId}`,
-          `workflow_list_result_${requestId}`
-        ]);
-        return;
-      }
-      
-      // Start detail scraping (same as productDetailsFromList)
-      const forceAPI = workflowState.forceAPI || false;
-      const scrapeDetailsState = {
-        links: productLinks,
-        currentIndex: 0,
-        details: [],
-        failedLinks: [],
-        attempts: {},
-        maxDetails: productLinks.length,
-        forceAPI: forceAPI
-      };
-      
-      chrome.storage.local.set({ scrapeDetailsState }, () => {
-        // Navigate to first link
-        if (productLinks[0]) {
-          window.location.href = productLinks[0];
-        }
-      });
-    });
+    ]);
   };
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -727,11 +683,16 @@
         
         // Update progress indicator
         const total = state.links.length;
-        const current = state.currentIndex + 1;
+        const skip = state.skip || 0; // Get skip value (default 0 for backward compatibility)
+        const current = state.currentIndex + 1; // Current position in sliced array (1-based)
+        const actualItemNumber = skip + current; // Calculate actual item number (1-based) in original list
         const percent = Math.round((current / total) * 100);
         if (window.DataScraperProgressIndicator) {
           window.DataScraperProgressIndicator.update(percent);
         }
+        
+        // Log actual item number for debugging (shows real position in original list)
+        console.log(`[Content] Scraping item ${actualItemNumber}/${skip + total} (currentIndex: ${state.currentIndex}, skip: ${skip})`);
         
         // Wait for page ready
         const scrapeAndContinue = async () => {
@@ -1348,14 +1309,7 @@
             chrome.storage.local.remove(['paginationState']);
             const finalProducts = Array.from(products.values()).slice(0, maxProducts);
             
-            // Save result to storage for background continuation (if workflow request)
-            const isWorkflow = requestId && String(requestId).startsWith('workflow_');
-            if (isWorkflow) {
-              chrome.storage.local.set({
-                [`workflow_list_result_${requestId}`]: finalProducts
-              });
-            }
-            
+            // Optimized: Don't save list to storage - workflow will handle slicing directly
             // Send result back to popup if it's still listening
             chrome.runtime.sendMessage({
               action: 'paginationComplete',
@@ -1364,18 +1318,6 @@
               url: window.location.href,
               timestamp: new Date().toISOString()
             });
-            
-            // If workflow and popup might be closed, trigger continuation check
-            if (isWorkflow) {
-              setTimeout(() => {
-                chrome.storage.local.get([`workflow_state_${requestId}`], (result) => {
-                  if (result[`workflow_state_${requestId}`]) {
-                    // Workflow state exists, continue scraping details
-                    continueWorkflowFromStorage(requestId);
-                  }
-                });
-              }, 1000); // Wait a bit for popup to handle if still open
-            }
             return;
           }
 

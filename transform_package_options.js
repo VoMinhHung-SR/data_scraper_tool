@@ -31,16 +31,55 @@ function parsePriceValue(priceStr) {
 function normalizeUnitCode(unitName) {
   if (!unitName || typeof unitName !== 'string') return '';
   
-  const lower = unitName.toLowerCase();
+  const lower = unitName.toLowerCase().trim();
   
   // Map common Vietnamese unit names (check before removing special chars)
+  // Order matters: more specific patterns first
+  
+  // Hộp (box) - various spellings
   if (/h[oộ]p/i.test(lower)) return 'hop';
-  if (/^vi[^e]|vỉ$/i.test(lower)) return 'vi';
+  
+  // Vỉ (blister pack) - must check before "viên"
+  if (/^vỉ|^vi[^eê]|vỉ$/i.test(lower)) return 'vi';
+  
+  // Viên (tablet/pill)
   if (/vi[êe]n/i.test(lower)) return 'vien';
+  
+  // Gói (packet/bag)
   if (/g[oó]i/i.test(lower)) return 'goi';
+  
+  // Chai (bottle)
   if (/chai/i.test(lower)) return 'chai';
-  if (/tu[ýy]p/i.test(lower)) return 'tuyp';
+  
+  // Tuýp/Tuyp (tube) - improved pattern to catch more variations
+  if (/tu[ýy]p|tuyp/i.test(lower)) return 'tuyp';
+  
+  // Miếng (piece/slice)
+  if (/mi[ếe]ng/i.test(lower)) return 'mieng';
+  
+  // Ống (tube/vial)
   if (/[oố]ng/i.test(lower)) return 'ong';
+  
+  // Thùng (carton/box)
+  if (/th[ùu]ng/i.test(lower)) return 'thung';
+  
+  // Lốc (pack/block)
+  if (/l[ốo]c/i.test(lower)) return 'loc';
+  
+  // Lọ (bottle/jar)
+  if (/l[ọo]/i.test(lower)) return 'lo';
+  
+  // Bình (bottle/flask)
+  if (/b[ìi]nh/i.test(lower)) return 'binh';
+  
+  // Túi (bag/pouch)
+  if (/t[úu]i/i.test(lower)) return 'tui';
+  
+  // Hũ (jar/pot)
+  if (/h[ũu]/i.test(lower)) return 'hu';
+  
+  // Hộp Ống (box of tubes) - compound unit
+  if (/h[oộ]p\s*[oố]ng|h[oộ]p\s*ống/i.test(lower)) return 'hopong';
   
   // Fallback: remove special chars and use as-is
   const normalized = lower.replace(/[^a-z0-9]/g, '');

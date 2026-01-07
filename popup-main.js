@@ -334,6 +334,11 @@
       clearBtn.addEventListener('click', () => {
         window.PopupState.clear();
         window.PopupDisplay.clearResults();
+        
+        // Cleanup skip for new session
+        if (window.DataScraperEcommerceHandlers && window.DataScraperEcommerceHandlers._cleanupSkipForNewSession) {
+          window.DataScraperEcommerceHandlers._cleanupSkipForNewSession();
+        }
       });
     }
 
@@ -360,40 +365,25 @@
       });
     }
 
-    // Auto-check export checkbox when maxProducts > 100 (but allow check/uncheck if <= 100)
+    // Auto-check and disable export checkbox when maxProducts >= 100 (allow click when < 100)
     const maxProductsInput = document.getElementById('maxProducts');
     const autoExportCheckbox = document.getElementById('autoExportCSV');
     if (maxProductsInput && autoExportCheckbox) {
-      let preventUncheckHandler = null;
-      
       const updateCheckboxState = () => {
         const value = parseInt(maxProductsInput.value) || 0;
         
-        // Remove previous prevent handler if exists
-        if (preventUncheckHandler) {
-          autoExportCheckbox.removeEventListener('click', preventUncheckHandler);
-          preventUncheckHandler = null;
-        }
-        
-        if (value > 100) {
-          // Auto-check if > 100
+        if (value >= 100) {
+          // Auto-check and disable if >= 100
           autoExportCheckbox.checked = true;
+          autoExportCheckbox.disabled = true;
           // Save auto-export state to storage
           chrome.storage.local.set({ autoExportEnabled: true });
           
-          // Prevent uncheck when > 100
-          preventUncheckHandler = (e) => {
-            if (!autoExportCheckbox.checked) {
-              // If trying to uncheck, prevent it and keep checked
-              e.preventDefault();
-              autoExportCheckbox.checked = true;
-            }
-          };
-          autoExportCheckbox.addEventListener('click', preventUncheckHandler);
-          
-          // Update label to show it's auto-enabled
+          // Update label to show it's auto-enabled and disabled
           const label = autoExportCheckbox.closest('label');
           if (label) {
+            label.style.cursor = 'not-allowed';
+            label.style.opacity = '0.7';
             const span = label.querySelector('span');
             if (span) {
               span.style.color = '#666';
@@ -401,13 +391,16 @@
             }
           }
         } else {
-          // Allow check/uncheck freely if <= 100
+          // Enable checkbox and allow check/uncheck if < 100
+          autoExportCheckbox.disabled = false;
           // Save auto-export state to storage
           chrome.storage.local.set({ autoExportEnabled: autoExportCheckbox.checked });
           
           // Reset label style
           const label = autoExportCheckbox.closest('label');
           if (label) {
+            label.style.cursor = 'pointer';
+            label.style.opacity = '1';
             const span = label.querySelector('span');
             if (span) {
               span.style.color = '';
@@ -417,11 +410,11 @@
         }
       };
       
-      // Listen to checkbox changes
+      // Listen to checkbox changes (only when enabled, i.e., < 100)
       autoExportCheckbox.addEventListener('change', () => {
         const value = parseInt(maxProductsInput.value) || 0;
-        // Only save if <= 100 (if > 100, it's always true)
-        if (value <= 100) {
+        // Only save if < 100 (if >= 100, it's always true and disabled)
+        if (value < 100) {
           chrome.storage.local.set({ autoExportEnabled: autoExportCheckbox.checked });
         }
       });

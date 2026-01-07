@@ -380,29 +380,8 @@
               log(`✅ Hoàn thành: ${finalProducts.length} sản phẩm (đã request ${maxProducts})`, '✅');
               
               if (options.requestId) {
-                // Save result to storage for background continuation (if workflow request)
-                const isWorkflow = String(options.requestId).startsWith('workflow_');
-                if (isWorkflow) {
-                  chrome.storage.local.set({
-                    [`workflow_list_result_${options.requestId}`]: finalProducts
-                  }, () => {
-                    // Trigger continuation check after a delay
-                    setTimeout(() => {
-                      chrome.storage.local.get([`workflow_state_${options.requestId}`], (result) => {
-                        if (result[`workflow_state_${options.requestId}`]) {
-                          // Workflow state exists, trigger continuation
-                          chrome.runtime.sendMessage({
-                            action: 'continueWorkflow',
-                            requestId: options.requestId
-                          }).catch(() => {
-                            // Content script might not be ready, that's ok
-                          });
-                        }
-                      });
-                    }, 1000);
-                  });
-                }
-                
+                // Optimized: Don't save list to storage - workflow will handle slicing directly
+                // Just send message with products
                 chrome.runtime.sendMessage({
                   action: 'scrollComplete',
                   requestId: options.requestId,
@@ -511,29 +490,8 @@
               log(`⏹️ Đã scroll tối đa ${maxScrolls} lần. Hoàn thành: ${finalProducts.length}/${maxProducts} sản phẩm`, '⏹️');
               
               if (options.requestId) {
-                // Save result to storage for background continuation (if workflow request)
-                const isWorkflow = String(options.requestId).startsWith('workflow_');
-                if (isWorkflow) {
-                  chrome.storage.local.set({
-                    [`workflow_list_result_${options.requestId}`]: finalProducts
-                  }, () => {
-                    // Trigger continuation check after a delay
-                    setTimeout(() => {
-                      chrome.storage.local.get([`workflow_state_${options.requestId}`], (result) => {
-                        if (result[`workflow_state_${options.requestId}`]) {
-                          // Workflow state exists, trigger continuation
-                          chrome.runtime.sendMessage({
-                            action: 'continueWorkflow',
-                            requestId: options.requestId
-                          }).catch(() => {
-                            // Content script might not be ready, that's ok
-                          });
-                        }
-                      });
-                    }, 1000);
-                  });
-                }
-                
+                // Optimized: Don't save list to storage - workflow will handle slicing directly
+                // Just send message with products
                 chrome.runtime.sendMessage({
                   action: 'scrollComplete',
                   requestId: options.requestId,

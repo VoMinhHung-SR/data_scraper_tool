@@ -637,15 +637,18 @@
           
           if (isDownloading) {
             // Already downloading, wait
+            console.log(`[ExportHandler] Already downloading, waiting... (currentFile: ${currentFile}, totalFiles: ${totalFiles})`);
             return;
           }
           
           if (currentFile >= totalFiles) {
-            console.log(`[ExportHandler] All ${totalFiles} files completed`);
+            console.log(`[ExportHandler] All ${totalFiles} files completed (currentFile: ${currentFile}, downloadedFiles: ${downloadedFiles.length})`);
             this._resetExportState();
             this._showExportCompleteModal(downloadedFiles, data.length);
             return;
           }
+          
+          console.log(`[ExportHandler] Starting download for file ${currentFile + 1}/${totalFiles} (currentFile: ${currentFile}, totalFiles: ${totalFiles}, data.length: ${data.length})`);
 
           // Mark as downloading to prevent concurrent downloads
           isDownloading = true;
@@ -693,44 +696,49 @@
           
           // Download with timeout protection
           let callbackFired = false;
+          
+          // Helper function to handle download completion (ensure it's only called once)
+          const handleDownloadComplete = () => {
+            if (callbackFired) {
+              console.warn(`[ExportHandler] Download callback already fired for file ${fileNumber}, ignoring duplicate call`);
+              return;
+            }
+            callbackFired = true;
+            
+            downloadedFiles.push({ filename, format: 'csv' });
+            console.log(`[ExportHandler] File ${fileNumber}/${totalFiles} downloaded: ${filename}`);
+            
+            // Cleanup content from memory
+            content = null;
+            
+            // Mark download complete and continue
+            isDownloading = false;
+            currentFile++;
+            
+            // Continue with next file after delay (allow browser to process)
+            setTimeout(downloadNext, 1500);
+          };
+          
           const downloadTimeout = setTimeout(() => {
             if (!callbackFired) {
               console.warn(`[ExportHandler] Download timeout for file ${fileNumber}, continuing...`);
-              callbackFired = true;
-              isDownloading = false;
-              downloadedFiles.push({ filename, format: 'csv' });
-              currentFile++;
-              setTimeout(downloadNext, 1000);
+              handleDownloadComplete();
             }
           }, 15000); // 15 second timeout per file
           
           // Download file
           try {
             this._downloadViaChromeAPI(content, filename, 'text/csv', 'csv', () => {
-              if (callbackFired) return;
-              callbackFired = true;
               clearTimeout(downloadTimeout);
-              
-              downloadedFiles.push({ filename, format: 'csv' });
-              console.log(`[ExportHandler] File ${fileNumber}/${totalFiles} downloaded: ${filename}`);
-              
-              // Cleanup content from memory
-              content = null;
-              
-              // Mark download complete and continue
-              isDownloading = false;
-              currentFile++;
-              
-              // Continue with next file after delay (allow browser to process)
-              setTimeout(downloadNext, 1500);
+              handleDownloadComplete();
             });
           } catch (error) {
             clearTimeout(downloadTimeout);
             console.error(`[ExportHandler] Error downloading file ${fileNumber}:`, error);
-            isDownloading = false;
-            currentFile++;
-            // Continue with next file
-            setTimeout(downloadNext, 1000);
+            // Even on error, continue to next file
+            if (!callbackFired) {
+              handleDownloadComplete();
+            }
           }
         };
         

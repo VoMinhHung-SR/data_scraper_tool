@@ -159,6 +159,9 @@
     handleScrapeDetailsFromList: function(tab) {
       if (!this._validateTab(tab)) return;
 
+      // Cleanup skip for new session (if user hasn't set skip value)
+      this._cleanupSkipForNewSession();
+
       const currentData = window.PopupState.getListData();
       if (!currentData || !Array.isArray(currentData) || currentData.length === 0) {
         window.PopupDisplay.showMessage('Không có danh sách sản phẩm. Vui lòng scrape danh sách trước!', 'error');
@@ -223,6 +226,7 @@
             `✅ Đã scrape thành công ${details.length}/${maxProducts} sản phẩm`, 
             'success'
           );
+          
           detailsSendResponse({ success: true });
         }
         return true;
@@ -237,7 +241,8 @@
           productLinks: productLinks.slice(0, maxDetails),
           delay: 2000,
           maxDetails: maxDetails,
-          forceAPI: forceAPI
+          forceAPI: forceAPI,
+          skip: skipProducts // Pass skip value to calculate actual item number (1-based)
         }
       }, (response) => {
         if (chrome.runtime.lastError) {
@@ -503,6 +508,26 @@
     },
 
     /**
+     * Cleanup skip value for new session
+     * If user has skip input value, keep it; otherwise reset to 0 and clear storage
+     */
+    _cleanupSkipForNewSession: function() {
+      const skipProductsInput = document.getElementById('skipProducts');
+      if (!skipProductsInput) return;
+      
+      const currentSkipValue = parseInt(skipProductsInput.value) || 0;
+      
+      // If user has explicitly set skip value (not 0), keep it
+      if (currentSkipValue > 0) {
+        console.log(`[EcommerceHandlers] Keeping skip value from user input: ${currentSkipValue}`);
+        return;
+      }
+      
+      // If skip is 0 or empty, reset to 0
+      skipProductsInput.value = 0;
+    },
+
+    /**
      * Internal function to proceed with scrape list and details
      */
     _proceedWithScrapeListAndDetails: function(tab, method = 'pagination') {
@@ -511,16 +536,20 @@
       // Fix: Clear any existing state first to prevent stuck listeners
       // This fixes the issue where scraping doesn't work after clear + routing
       // Clear all scraper-related states to ensure clean start
+      // NOTE: Only clear states BEFORE starting new scrape, not during scraping
       const stateKeysToRemove = [
         'scrapeDetailsState',
-        'paginationState',
+        // Don't clear paginationState here - it will be managed by the scraper itself
+        // Clearing it here can interrupt ongoing scraping
+        // 'paginationState',
         // Export related keys (clear to avoid conflicts with previous session)
         'currentExportBatch',
         'exportCompleted',
         'pendingAutoExport',
-        window.DataScraperStateManager?.KEYS?.PAGINATION,
         window.DataScraperStateManager?.KEYS?.DETAIL_LIST,
         window.DataScraperStateManager?.KEYS?.API_CACHE
+        // Don't clear PAGINATION key here - let scraper manage it
+        // window.DataScraperStateManager?.KEYS?.PAGINATION,
       ].filter(Boolean);
       
       chrome.storage.local.remove(stateKeysToRemove, () => {
@@ -529,6 +558,10 @@
         }
         // Continue after cleanup
       });
+      
+      // Cleanup skip for new session (reset if user hasn't set skip value)
+      // Do this AFTER clearing states to avoid conflicts
+      this._cleanupSkipForNewSession();
 
       const maxProductsInput = document.getElementById('maxProducts');
       const skipProductsInput = document.getElementById('skipProducts');

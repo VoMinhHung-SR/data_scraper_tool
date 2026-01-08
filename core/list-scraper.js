@@ -38,7 +38,8 @@
         forceAPI: options.forceAPI || false, // Store forceAPI option
         startedAt: Date.now(),
         failedLinks: [],
-        attempts: {}
+        attempts: {},
+        skip: options.skip || 0 // Store skip value to calculate actual item number (1-based)
       };
       
       // Create progress indicator

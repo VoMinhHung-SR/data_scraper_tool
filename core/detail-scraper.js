@@ -254,7 +254,7 @@
           if (articleEl) {
             const articleText = Utils.getText(articleEl).trim();
             // Kiểm tra nếu text có pattern package (Hộp, Gói, Vỉ, etc.) kèm số
-            if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+.*\d+/i.test(articleText)) {
+            if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ)\s+.*\d+/i.test(articleText)) {
               packageSize = articleText;
               break;
             }
@@ -272,7 +272,7 @@
               // Kiểm tra nếu div có class text-gray-10 và text-body (hoặc text-body1, text-body2)
               // và text có pattern package kèm số, và không phải là label "Quy cách"
               if ((divClass.includes('text-gray-10') && (divClass.includes('text-body') || divClass.includes('text-body1') || divClass.includes('text-body2'))) &&
-                  /^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+.*\d+/i.test(divText) &&
+                  /^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ)\s+.*\d+/i.test(divText) &&
                   !/Quy\s+cách/i.test(divText)) {
                 packageSize = divText;
                 break;
@@ -286,7 +286,7 @@
             for (const div of valueDivs) {
               const divText = Utils.getText(div).trim();
               // Kiểm tra nếu text có pattern package kèm số và không phải là label
-              if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+.*\d+/i.test(divText) && !/Quy\s+cách/i.test(divText)) {
+              if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ)\s+.*\d+/i.test(divText) && !/Quy\s+cách/i.test(divText)) {
                 packageSize = divText;
                 break;
               }
@@ -298,7 +298,7 @@
             const parts = rowText.split(/Quy\s+cách/i);
             if (parts.length > 1) {
               const valuePart = parts[1].trim().split(/\n/)[0].trim();
-              if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+.*\d+/i.test(valuePart)) {
+              if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ)\s+.*\d+/i.test(valuePart)) {
                 packageSize = valuePart;
               }
             }
@@ -316,7 +316,7 @@
         for (const articleEl of articleEls) {
           const articleText = Utils.getText(articleEl).trim();
           // Kiểm tra nếu text có pattern package (Hộp, Gói, Vỉ, etc.) kèm số
-          if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+.*\d+/i.test(articleText)) {
+          if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ)\s+.*\d+/i.test(articleText)) {
             // Kiểm tra xem element có nằm trong context đúng không
             // Tìm parent có class chứa text-gray-10 và text-body
             let current = articleEl.parentElement;
@@ -363,7 +363,7 @@
           if (classList.includes('text-gray-10') && classList.includes('text-body2')) {
             const text = Utils.getText(div).trim();
             // Kiểm tra nếu text bắt đầu bằng pattern package (Hộp, Gói, Vỉ, etc.)
-            if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*(x\s*)?\d+/i.test(text)) {
+            if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ)\s*(x\s*)?\d+/i.test(text)) {
               packageSizeEl = div;
               break;
             }
@@ -376,7 +376,7 @@
           if (/\d/.test(packageText)) {
             packageSize = packageText;
           } else {
-            const unitMatch = packageText.match(/^(Hộp|Chai|Tuýp|Gói|Vỉ|Ống|Viên|ml|g)/i);
+            const unitMatch = packageText.match(/^(Hộp|Chai|Tuýp|Tuyp|Miếng|Gói|Vỉ|Ống|Viên|ml|g|Thùng|Lốc|Lọ|Bình|Túi|Hũ)/i);
             if (unitMatch) {
               packageSize = unitMatch[1];
             } else {
@@ -395,11 +395,11 @@
       
       // Strategy 5: Fallback - tìm từ fullText bằng regex
       if (!packageSize) {
-        const packageMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s+(\d+)\s*(ống|viên|vỉ|gói|ml|g)/i);
+        const packageMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ)\s+(\d+)\s*(ống|viên|vỉ|gói|ml|g|chai|tuýp|tuyp|miếng|thùng|lốc|lọ|bình|túi|hũ)/i);
         if (packageMatch) {
           packageSize = packageMatch[0].trim();
         } else {
-          const simpleMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp)\s*(x\s*)?\d+[^\s]*/i);
+          const simpleMatch = fullText.match(/(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ)\s*(x\s*)?\d+[^\s]*/i);
           if (simpleMatch) {
             packageSize = simpleMatch[0].trim();
           }
@@ -475,7 +475,7 @@
         const unitButtons = Utils.safeQueryAll('[data-test="unit_lv1"], [data-test*="unit"]', variantContainer);
         for (const btn of unitButtons) {
           const btnText = Utils.getText(btn).trim();
-          if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Hộp\s+Ống)$/i.test(btnText)) {
+          if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ|Hộp\s+Ống)$/i.test(btnText)) {
             if (btn.offsetParent !== null && !btn.disabled) {
               variantButtons.push({
                 element: btn,
@@ -496,8 +496,8 @@
           
           for (const btn of allButtons) {
             const btnText = Utils.getText(btn).trim();
-            // Kiểm tra nếu text là variant option (Hộp, Gói, Vỉ, Ống, Viên, ml, g, Chai, Tuýp, Hộp Ống)
-            if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Hộp\s+Ống)$/i.test(btnText)) {
+            // Kiểm tra nếu text là variant option (Hộp, Gói, Vỉ, Ống, Viên, ml, g, Chai, Tuýp, Tuyp, Miếng, Thùng, Lốc, Lọ, Bình, Túi, Hũ, Hộp Ống)
+            if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ|Hộp\s+Ống)$/i.test(btnText)) {
               // Kiểm tra xem button có thể click được không
               if (btn.offsetParent !== null && !btn.disabled) {
                 variantButtons.push({
@@ -522,7 +522,7 @@
             const classList = div.className || '';
             if (classList.includes('text-body2') && classList.includes('text-gray-10')) {
               const variantText = Utils.getText(div).trim();
-              if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Hộp\s+Ống)/i.test(variantText)) {
+              if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ|Hộp\s+Ống)/i.test(variantText)) {
                 if (processedVariants.has(variantText)) continue;
                 processedVariants.add(variantText);
                 

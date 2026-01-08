@@ -73,8 +73,9 @@
           .filter(link => link && link.includes('.html'));
 
         // Apply skip và limit
-        const startIndex = skip;
-        const endIndex = skip + limit;
+        // Example: skip=200, limit=100 → bỏ qua items [0-199], scrape items [200-299]
+        const startIndex = skip; // Bỏ qua skip items đầu tiên
+        const endIndex = skip + limit; // Lấy limit items từ vị trí skip
         const productLinks = allProductLinks.slice(startIndex, endIndex);
 
         if (productLinks.length === 0) {
@@ -160,7 +161,7 @@
           }
         });
 
-        // Listen for completion (but also save to storage for background continuation)
+        // Listen for completion - optimized: don't save to storage, just return products
         const messageListener = (message, sender, sendResponse) => {
           if ((message?.action === 'paginationComplete' || message?.action === 'scrollComplete') &&
               message?.requestId === requestId) {
@@ -168,22 +169,8 @@
             
             const products = message.data || [];
             
-            // Save list result to storage for background continuation
-            chrome.storage.local.set({
-              [`workflow_list_result_${requestId}`]: products
-            }, () => {
-              // Trigger content script to continue workflow if popup is closed
-              chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs && tabs.length > 0) {
-                  chrome.tabs.sendMessage(tabs[0].id, {
-                    action: 'continueWorkflow',
-                    requestId: requestId
-                  }).catch(() => {
-                    // Content script might not be ready, that's ok
-                  });
-                }
-              });
-            });
+            // Optimized: Don't save list to storage - just slice and scrape details directly
+            // This saves storage space and is more efficient
             
             if (onProgress) {
               onProgress({

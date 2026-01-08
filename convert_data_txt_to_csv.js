@@ -1,7 +1,17 @@
 #!/usr/bin/env node
 /**
  * Convert data.txt to CSV format matching the export schema
- * Usage: node convert_data_txt_to_csv.js [outputFile]
+ * Usage: node convert_data_txt_to_csv.js [titleSlug] [outputDir] [inputFile]
+ * 
+ * Arguments:
+ *   titleSlug  - Slug for the output filename (e.g., "thuoc-tim-mach-va-mau" or "thuoc/thuoc-tim-mach-va-mau")
+ *   outputDir  - Output directory path (default: test/data/new/{category})
+ *   inputFile  - Input JSON file path (default: data.txt)
+ * 
+ * Examples:
+ *   node convert_data_txt_to_csv.js "thuoc-tim-mach-va-mau"
+ *   node convert_data_txt_to_csv.js "thuoc/thuoc-tim-mach-va-mau" "./output"
+ *   node convert_data_txt_to_csv.js "thuoc-tim-mach-va-mau" "./output" "./custom-data.txt"
  */
 
 const fs = require('fs');
@@ -276,16 +286,80 @@ function convertToCSV(data) {
 }
 
 /**
+ * Extract category from titleSlug
+ * Examples:
+ *   "thuoc/thuoc-tim-mach-va-mau" -> "thuoc"
+ *   "thuoc-tim-mach-va-mau" -> "thuoc"
+ *   "duoc-mi-pham/cham-soc-co-the" -> "duoc-mi-pham"
+ */
+function extractCategory(titleSlug) {
+  if (!titleSlug) return 'thuoc';
+  
+  // If contains slash, extract first part
+  if (titleSlug.includes('/')) {
+    return titleSlug.split('/')[0];
+  }
+  
+  // Try to extract category from slug pattern
+  // Common patterns: thuoc-*, duoc-mi-pham-*, thuc-pham-chuc-nang-*
+  const patterns = ['thuoc', 'duoc-mi-pham', 'thuc-pham-chuc-nang'];
+  for (const pattern of patterns) {
+    if (titleSlug.startsWith(pattern)) {
+      return pattern;
+    }
+  }
+  
+  // Default to thuoc if can't determine
+  return 'thuoc';
+}
+
+/**
  * Main function
  */
 function main() {
   const args = process.argv.slice(2);
-  const inputFile = path.join(__dirname, 'data.txt');
-  const outputFile = args[0] || path.join(__dirname, 'scraped-data.csv');
+  
+  // Parse arguments: [titleSlug] [outputDir] [inputFile]
+  const titleSlug = args[0] || 'title';
+  const outputDirArg = args[1];
+  const inputFileArg = args[2];
+  
+  // Determine input file
+  const inputFile = inputFileArg 
+    ? (path.isAbsolute(inputFileArg) ? inputFileArg : path.join(__dirname, inputFileArg))
+    : path.join(__dirname, 'data.txt');
+  
+  // Extract category from titleSlug
+  const category = extractCategory(titleSlug);
+  
+  // Convert titleSlug to categorySlug (replace / with -)
+  const categorySlug = titleSlug.replace(/\//g, '-');
+  
+  // Determine output directory
+  const outputDir = outputDirArg
+    ? (path.isAbsolute(outputDirArg) ? outputDirArg : path.join(__dirname, outputDirArg))
+    : path.join(__dirname, 'test', 'data', 'new', category);
+  
+  const baseName = `scraped-data-${categorySlug}`;
+  
+  // Display configuration
+  console.log('📋 Configuration:');
+  console.log(`   Title Slug: ${titleSlug}`);
+  console.log(`   Category: ${category}`);
+  console.log(`   Input File: ${inputFile}`);
+  console.log(`   Output Directory: ${outputDir}`);
+  console.log(`   Base Filename: ${baseName}`);
+  console.log('');
   
   if (!fs.existsSync(inputFile)) {
     console.error(`❌ File not found: ${inputFile}`);
     process.exit(1);
+  }
+  
+  // Ensure output directory exists
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+    console.log(`📁 Created output directory: ${outputDir}`);
   }
   
   try {
@@ -325,9 +399,7 @@ function main() {
         const actualStartIndex = start + 1;
         const actualEndIndex = end;
         
-        const baseName = path.basename(outputFile, '.csv');
-        const dirName = path.dirname(outputFile);
-        const filename = path.join(dirName, `${baseName}-${actualStartIndex}-${actualEndIndex}.csv`);
+        const filename = path.join(outputDir, `${baseName}-${actualStartIndex}-${actualEndIndex}.csv`);
         
         console.log(`\n📄 Exporting file ${fileIndex + 1}/${totalFiles}: ${path.basename(filename)}`);
         console.log(`   Items: ${actualStartIndex}-${actualEndIndex} (${chunk.length} items)`);
@@ -340,7 +412,7 @@ function main() {
       
       console.log('\n✅ Successfully exported all files!');
       console.log(`📊 Total: ${data.length} products in ${exportedFiles.length} files`);
-      console.log(`📁 Output directory: ${path.dirname(outputFile)}`);
+      console.log(`📁 Output directory: ${outputDir}`);
       console.log('\n📄 Exported files:');
       exportedFiles.forEach((file, index) => {
         console.log(`   ${index + 1}. ${path.basename(file)}`);
@@ -350,6 +422,7 @@ function main() {
       console.log('\n📄 Converting to CSV (single file)...');
       const csvContent = convertToCSV(data);
       
+      const outputFile = path.join(outputDir, `${baseName}-1-${data.length}.csv`);
       console.log(`💾 Writing to: ${outputFile}`);
       fs.writeFileSync(outputFile, csvContent, 'utf-8');
       

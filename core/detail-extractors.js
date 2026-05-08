@@ -7,6 +7,28 @@
   // Helper functions for product detail extraction
   // Extracted from content.js for better organization
 
+  /**
+   * Reject obviously-bad brand candidates that came from misfired selectors.
+   * Long Châu DOM has many `div.font-medium` nodes; without this guard the
+   * extractor used to leak gallery overlays like "Xem thêm 4 ảnh" into
+   * `basicInfo.brand`, which then created junk `Brand` rows on import.
+   */
+  const _isValidBrand = (text) => {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.trim();
+    if (t.length < 2 || t.length > 80) return false;
+    // Gallery / UI noise observed on Long Châu detail pages.
+    if (/^Xem\s+thêm/i.test(t)) return false;
+    if (/^Sao\s+chép/i.test(t)) return false;
+    if (/^Tra\s+cứu/i.test(t)) return false;
+    if (/^\d+\s*ảnh$/i.test(t)) return false;
+    // Pure number (e.g. accidental price/sku capture).
+    if (/^\d+([.,]\d+)?$/.test(t)) return false;
+    // Currency / quantity patterns.
+    if (/^\d{1,3}([.,]\d{3})*\s*[₫đ]/i.test(t)) return false;
+    return true;
+  };
+
   window.DataScraperDetailExtractors = {
     /**
      * Extract price information from container
@@ -319,20 +341,43 @@
       }
       
       // Extract brand
+      // Strategy 1 (primary): brand is rendered as a hyperlink to the brand
+      // listing page, e.g. <a href="/thuong-hieu/hlh-biopharma">HLH BIOPHARMA</a>.
+      // This is the most reliable anchor on Long Châu detail pages.
       let brand = '';
-      const brandEl = Utils.safeQuery('div.font-medium', container);
-      if (brandEl) {
-        const brandText = Utils.getText(brandEl);
-        const brandMatch = brandText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
-        if (brandMatch) {
-          brand = brandMatch[1].trim();
-        } else {
-          brand = brandText.replace(/Thương\s+hiệu[:\s]*/gi, '').trim();
+      const brandLink = Utils.safeQuery('a[href*="/thuong-hieu/"], a[href*="thuong-hieu"]', container);
+      if (brandLink) {
+        const linkText = Utils.getText(brandLink).trim();
+        if (_isValidBrand(linkText)) {
+          brand = linkText;
         }
-      } else {
-        const brandMatch = fullText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
-        if (brandMatch) {
-          brand = brandMatch[1].trim().split(/\s+/)[0];
+      }
+
+      // Strategy 2: fall back to text after the "Thương hiệu" label in fullText.
+      if (!brand) {
+        const labelMatch = fullText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
+        if (labelMatch) {
+          // Take the first sensible token group (avoid trailing labels like
+          // "Số đăng ký..." that may be on the same line in some layouts).
+          const candidate = labelMatch[1].trim().split(/\s{2,}|\t|\|/)[0].trim();
+          if (_isValidBrand(candidate)) {
+            brand = candidate;
+          }
+        }
+      }
+
+      // Strategy 3 (last resort): the legacy `div.font-medium` heuristic, but
+      // only when its text actually contains the "Thương hiệu" label so we
+      // don't capture gallery overlays like "Xem thêm 4 ảnh".
+      if (!brand) {
+        const brandEl = Utils.safeQuery('div.font-medium', container);
+        if (brandEl) {
+          const brandText = Utils.getText(brandEl);
+          const m = brandText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
+          if (m) {
+            const candidate = m[1].trim();
+            if (_isValidBrand(candidate)) brand = candidate;
+          }
         }
       }
       

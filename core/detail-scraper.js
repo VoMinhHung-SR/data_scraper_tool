@@ -470,6 +470,10 @@
           // Tìm tất cả variant buttons
           // Ưu tiên tìm bằng data-test="unit_lv1" (theo DOM path user cung cấp)
           const variantButtons = [];
+          // Dedupe responsive (mobile/desktop) duplicates: Long Châu render 2 nhóm
+          // qua Tailwind `umd:` / `omd:` prefix. offsetParent đôi khi không lọc hết
+          // → chốt theo unit code đã normalize.
+          const seenUnitCodes = new Set();
         
         // Strategy 1: Tìm bằng data-test="unit_lv1"
         const unitButtons = Utils.safeQueryAll('[data-test="unit_lv1"], [data-test*="unit"]', variantContainer);
@@ -477,6 +481,9 @@
           const btnText = Utils.getText(btn).trim();
           if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ|Hộp\s+Ống)$/i.test(btnText)) {
             if (btn.offsetParent !== null && !btn.disabled) {
+              const unitCode = Extractors.normalizeUnitCode(btnText);
+              if (seenUnitCodes.has(unitCode)) continue;
+              seenUnitCodes.add(unitCode);
               variantButtons.push({
                 element: btn,
                 text: btnText,
@@ -500,6 +507,9 @@
             if (/^(Hộp|Gói|Vỉ|Ống|Viên|ml|g|Chai|Tuýp|Tuyp|Miếng|Thùng|Lốc|Lọ|Bình|Túi|Hũ|Hộp\s+Ống)$/i.test(btnText)) {
               // Kiểm tra xem button có thể click được không
               if (btn.offsetParent !== null && !btn.disabled) {
+                const unitCode = Extractors.normalizeUnitCode(btnText);
+                if (seenUnitCodes.has(unitCode)) continue;
+                seenUnitCodes.add(unitCode);
                 variantButtons.push({
                   element: btn,
                   text: btnText,
@@ -901,7 +911,21 @@
             }
           }
         }
-        
+
+        // Safety net: dedupe by unit code in case any branch double-pushed
+        // (vd Strategy 3 fallback hoặc race khi click variants).
+        if (packageOptions.length > 1) {
+          const dedupedByCode = new Map();
+          for (const opt of packageOptions) {
+            const key = opt.unit || opt.unitDisplay || '';
+            if (!dedupedByCode.has(key)) dedupedByCode.set(key, opt);
+          }
+          if (dedupedByCode.size !== packageOptions.length) {
+            packageOptions.length = 0;
+            packageOptions.push(...dedupedByCode.values());
+          }
+        }
+
         return packageOptions;
       };
       

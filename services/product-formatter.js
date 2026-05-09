@@ -91,6 +91,41 @@
   };
 
   /**
+   * Enforce a deterministic ordering on saleUnits regardless of which variant
+   * was active in the DOM when the page was scraped. Without this, scraping
+   * the same product twice can yield different `unitOrder` and `isDefault`
+   * depending on which unit button the user happened to click first.
+   *
+   * Ordering rules (largest → smallest pack):
+   *   1) `quantityInBase` DESC (null/undefined treated as smallest).
+   *   2) `priceValue` DESC (more expensive ⇒ larger pack as fallback).
+   *   3) Original index ASC for stable tie-breaking.
+   *
+   * Side effects: rewrites `unitOrder = 0..n-1` and forces `isDefault = (i===0)`
+   * so the largest pack is always the canonical default. Other fields untouched.
+   */
+  const _normalizeSaleUnitsOrder = (saleUnits) => {
+    if (!Array.isArray(saleUnits) || saleUnits.length === 0) return saleUnits || [];
+    const indexed = saleUnits.map((u, i) => ({ unit: u, _origIdx: i }));
+    indexed.sort((a, b) => {
+      const qa = (typeof a.unit.quantityInBase === 'number' && Number.isFinite(a.unit.quantityInBase))
+        ? a.unit.quantityInBase : -Infinity;
+      const qb = (typeof b.unit.quantityInBase === 'number' && Number.isFinite(b.unit.quantityInBase))
+        ? b.unit.quantityInBase : -Infinity;
+      if (qa !== qb) return qb - qa;
+      const pa = (typeof a.unit.priceValue === 'number') ? a.unit.priceValue : 0;
+      const pb = (typeof b.unit.priceValue === 'number') ? b.unit.priceValue : 0;
+      if (pa !== pb) return pb - pa;
+      return a._origIdx - b._origIdx;
+    });
+    return indexed.map(({ unit }, i) => ({
+      ...unit,
+      unitOrder: i,
+      isDefault: i === 0
+    }));
+  };
+
+  /**
    * Build the structured saleUnits array from raw packageOptions emitted by
    * the detail scraper, enriching with quantityInBase derived from packing.
    */
@@ -179,39 +214,30 @@
       const resolvedPackageOptions = Array.isArray(data.pricing?.packageOptions)
         ? data.pricing.packageOptions
         : (Array.isArray(data.packageOptions) ? data.packageOptions : []);
-      const resolvedSaleUnits = Array.isArray(data.pricing?.saleUnits) && data.pricing.saleUnits.length > 0
+      const resolvedSaleUnitsRaw = Array.isArray(data.pricing?.saleUnits) && data.pricing.saleUnits.length > 0
         ? data.pricing.saleUnits
         : _buildSaleUnits(resolvedPackageOptions, resolvedPackageSize);
+      const resolvedSaleUnits = _normalizeSaleUnitsOrder(resolvedSaleUnitsRaw);
 
+      // Slim pricing block — see plans/[UnDone] csv-importer-fields-cleanup.plan.md §2A.
+      // Dropped 2026-05-09 (no consumer): price, currentPrice, originalPrice,
+      // originalPriceValue, discount, discountPercent, prices.
+      // Kept:
+      //   - priceDisplay, priceValue → canonical importer (Product.list_price).
+      //   - currentPriceValue       → internal filter pipeline (filter-analyzer.js,
+      //                                generate-dynamic-filters.js read this CSV col).
+      //   - packageSize, packageOptions, saleUnits → variant import + display.
       const pricing = {
-        price: data.pricing?.price || data.price || data.currentPrice || '',
         priceDisplay: priceDisplay,
         priceValue: data.pricing?.priceValue !== undefined ? data.pricing.priceValue : (data.priceValue || data.currentPriceValue || 0),
-        currentPrice: data.pricing?.currentPrice || data.currentPrice || data.price || '',
         currentPriceValue: data.pricing?.currentPriceValue !== undefined ? data.pricing.currentPriceValue : (data.currentPriceValue || data.priceValue || 0),
-        originalPrice: data.pricing?.originalPrice || data.originalPrice || '',
-        originalPriceValue: data.pricing?.originalPriceValue !== undefined ? data.pricing.originalPriceValue : (data.originalPriceValue || 0),
-        discount: data.pricing?.discount !== undefined ? data.pricing.discount : (data.discount || 0),
-        discountPercent: data.pricing?.discountPercent !== undefined ? data.pricing.discountPercent : (data.discountPercent || 0),
         packageSize: resolvedPackageSize,
-        prices: Array.isArray(data.pricing?.prices) ? data.pricing.prices : (Array.isArray(data.prices) ? data.prices : []),
-        priceObj: data.pricing?.priceObj || data.priceObj || null,
         packageOptions: resolvedPackageOptions,
-        // Structured saleUnits for the new BE Product/ProductVariantUnit importer.
-        // Backward compat: legacy importer keeps reading `packageOptions` string.
         saleUnits: resolvedSaleUnits
-      };
-
-      const rating = {
-        rating: data.rating?.rating || data.rating || '',
-        reviewCount: data.rating?.reviewCount || data.reviewCount || '',
-        commentCount: data.rating?.commentCount || data.commentCount || '',
-        reviews: data.rating?.reviews || data.reviews || ''
       };
 
       const category = {
         category: Array.isArray(data.category?.category) ? data.category.category : (Array.isArray(data.category) ? data.category : []),
-        categoryPath: data.category?.categoryPath || data.categoryPath || '',
         categorySlug: data.category?.categorySlug || data.categorySlug || ''
       };
 
@@ -245,16 +271,13 @@
       };
 
       const metadata = {
-        link: data.metadata?.link || data.link || '',
         productRanking: data.metadata?.productRanking !== undefined ? data.metadata.productRanking : (data.productRanking || 0),
-        displayCode: data.metadata?.displayCode !== undefined ? data.metadata.displayCode : (data.displayCode || 1),
         isPublish: data.metadata?.isPublish !== undefined ? data.metadata.isPublish : (data.isPublish !== undefined ? data.isPublish : true)
       };
 
       return {
         basicInfo,
         pricing,
-        rating,
         category,
         media,
         content,
@@ -282,18 +305,12 @@
         brand: groupedData.basicInfo?.brand || '',
         webName: groupedData.basicInfo?.webName || '',
         slug: groupedData.basicInfo?.slug || '',
-        price: groupedData.pricing?.price || priceDisplay || '',
+        // Slim pricing — see formatProductDetail() block. `price`, `prices`, and
+        // all `rating.*` fields dropped 2026-05-09 (no CSV consumer).
         priceDisplay: priceDisplay,
         priceValue: groupedData.pricing?.priceValue || 0,
         packageSize: groupedData.pricing?.packageSize || '',
-        prices: groupedData.pricing?.prices || [],
-        priceObj: groupedData.pricing?.priceObj || null,
-        rating: groupedData.rating?.rating || '',
-        reviewCount: groupedData.rating?.reviewCount || '',
-        commentCount: groupedData.rating?.commentCount || '',
-        reviews: groupedData.rating?.reviews || '',
         category: groupedData.category?.category || [],
-        categoryPath: groupedData.category?.categoryPath || '',
         categorySlug: groupedData.category?.categorySlug || '',
         image: groupedData.media?.image || '',
         images: groupedData.media?.images || [],
@@ -309,9 +326,7 @@
         manufacturer: groupedData.specifications?.manufacturer || '',
         shelfLife: groupedData.specifications?.shelfLife || '',
         specifications: groupedData.specifications?.specifications || {},
-        link: groupedData.metadata?.link || '',
         productRanking: groupedData.metadata?.productRanking || 0,
-        displayCode: groupedData.metadata?.displayCode || 1,
         isPublish: groupedData.metadata?.isPublish !== undefined ? groupedData.metadata.isPublish : true
       };
     }

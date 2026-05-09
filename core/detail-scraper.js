@@ -29,151 +29,66 @@
     },
 
     /**
-     * Extract content from a detail section
+     * Click "Xem tất cả thông tin" (or equivalent) to mount the hidden
+     * second-half spec rows (Quy cách, Nhà sản xuất, Nước sản xuất, Hạn sử
+     * dụng, …) before extraction.
+     *
+     * Long Châu's product-detail page renders the spec panel in two
+     * `div.space-y-4` blocks. The second block is gated behind an expand
+     * button and is not present in the DOM at all until clicked — CSS
+     * `display:none` is NOT used, so any selector-based extractor will miss
+     * those rows on a fresh page load.
+     *
+     * The function is best-effort and idempotent:
+     * - If no expand button is found (button already triggered, or product
+     *   page has fully expanded layout), it returns silently.
+     * - After clicking it polls for `[data-theme-element="article"]` count to
+     *   grow (React render cycle), bounded by `MAX_WAIT_MS`. The poll grace
+     *   period is generous because mobile/slow connections can take a beat to
+     *   re-render.
      */
-    extractDetailSection: (sectionId, className = null) => {
-      const Utils = window.DataScraperUtils;
-      let section = null;
-      if (className) {
-        section = Utils.safeQuery(`.${className}, [class*="${className}"]`);
-      }
-      
-      if (!section && sectionId) {
-        section = Utils.safeQuery(`#${sectionId}, [id="${sectionId}"]`);
-      }
-      
-      if (!section) {
-        return '';
-      }
-
+    _revealHiddenSpecSection: async (Utils) => {
       try {
-        const heading = Utils.safeQuery('h2, h3, h4', section);
-        if (heading) {
-          const contentDiv = Utils.safeQuery('div > div', section);
-          const isCollapsed = !contentDiv || 
-                             contentDiv.style.display === 'none' || 
-                             contentDiv.offsetHeight === 0 ||
-                             section.classList.contains('collapsed');
-          
-          if (isCollapsed) {
-            heading.click();
-            setTimeout(() => {}, 100);
-          }
-        }
-      } catch (e) {
-      }
+        const EXPAND_LABEL_PATTERN = /Xem\s+tất\s+cả\s+thông\s+tin/i;
+        const POLL_INTERVAL_MS = 50;
+        const MAX_WAIT_MS = 1500;
 
-      const content = section.cloneNode(true);
-      
-      const heading = Utils.safeQuery('h2, h3, h4', content);
-      if (heading) {
-        heading.remove();
-      }
-      const removeSelectors = ['button', '[class*="toggle"]', '[class*="collapse"]', '[class*="expand"]', '[class*="css-"]'];
-      removeSelectors.forEach(sel => {
-        Utils.safeQueryAll(sel, content).forEach(el => el.remove());
-      });
-      
-      let text = '';
-      
-      // Tìm div con chứa nội dung (thường là div đầu tiên sau heading)
-      const contentDiv = Utils.safeQuery('div > div', content) || content;
-      
-      // Extract từ paragraphs (ưu tiên) - loại bỏ các câu hỏi "là gì?", table headers
-      const paragraphs = Utils.safeQueryAll('p', contentDiv);
-      if (paragraphs.length > 0) {
-        paragraphs.forEach(p => {
-          // Bỏ qua nếu paragraph nằm trong table
-          if (p.closest('table')) {
-            return;
-          }
-          
-          const pText = Utils.getText(p).trim();
-          // Loại bỏ các text là heading, câu hỏi "là gì?", table headers, và các text ngắn
-          if (pText && 
-              pText.length > 10 && 
-              !pText.match(/^(Mô tả|Thành phần|Công dụng|Cách dùng|Tác dụng phụ|Lưu ý|Bảo quản|Đối tượng|Thông tin)/i) &&
-              !pText.match(/là\s+gì\?/i) && // Loại bỏ "X là gì?"
-              !pText.match(/Thành\s+phần\s+cho/i) && // Loại bỏ "Thành phần cho 1 viên"
-              !pText.match(/Thông\s+tin\s+thành\s+phần/i) && // Loại bỏ "Thông tin thành phần"
-              !pText.match(/Hàm\s+lượng/i) && // Loại bỏ "Hàm lượng"
-              !pText.match(/^\d+mg$/i) && // Loại bỏ "180mg", "40mg"
-              !pText.match(/^[:\s]*$/)) {
-            text += pText + '\n';
-          }
-        });
-      }
-      
-      // Extract từ lists (bỏ qua nếu nằm trong table)
-      const lists = Utils.safeQueryAll('ul, ol', contentDiv);
-      lists.forEach(list => {
-        // Bỏ qua nếu list nằm trong table
-        if (list.closest('table')) {
-          return;
-        }
-        
-        const items = Utils.safeQueryAll('li', list);
-        items.forEach(li => {
-          const liText = Utils.getText(li).trim();
-          if (liText && liText.length > 5) {
-            text += '• ' + liText + '\n';
-          }
-        });
-      });
-      
-      // Extract từ các div có nội dung trực tiếp (nếu không có p/ul)
-      // BỎ QUA table và các div chứa table
-      if (!text.trim()) {
-        const directDivs = Utils.safeQueryAll('div', contentDiv);
-        directDivs.forEach(div => {
-          // Bỏ qua div có table hoặc nằm trong table
-          if (div.querySelector('table') || div.closest('table')) {
-            return;
-          }
-          
-          // Bỏ qua div có children phức tạp
-          const hasComplexChildren = div.querySelector('p, ul, ol, table, h1, h2, h3, h4');
-          if (!hasComplexChildren) {
-            const divText = Utils.getText(div).trim();
-            // Lấy div có text dài hơn 10 ký tự và không phải là heading, không phải table content
-            if (divText && divText.length > 10 && 
-                !divText.match(/^(Mô tả|Thành phần|Công dụng|Cách dùng|Tác dụng phụ|Lưu ý|Bảo quản)/i) &&
-                !divText.match(/Thành\s+phần\s+cho/i) &&
-                !divText.match(/Thông\s+tin\s+thành\s+phần/i) &&
-                !divText.match(/Hàm\s+lượng/i)) {
-              text += divText + '\n';
+        const findButton = () => {
+          // Prefer cursor-pointer wrappers (Long Châu's clickable container
+          // pattern); fall back to <button>. Match by visible text so we
+          // ride out class-name churn between releases.
+          const candidates = Utils.safeQueryAll(
+            'div[class*="cursor-pointer"], button, [role="button"]'
+          );
+          for (const el of candidates) {
+            const text = Utils.getText(el).trim();
+            if (text && EXPAND_LABEL_PATTERN.test(text) && text.length < 80) {
+              return el;
             }
           }
-        });
-      }
-      
-      // Fallback: lấy toàn bộ text từ contentDiv nếu vẫn chưa có
-      if (!text.trim()) {
-        text = Utils.getText(contentDiv).trim();
-        // Loại bỏ heading text nếu có
-        if (heading) {
-          const headingText = Utils.getText(heading);
-          text = text.replace(new RegExp(headingText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '').trim();
+          return null;
+        };
+
+        const btn = findButton();
+        if (!btn) return false;
+
+        const beforeCount = Utils.safeQueryAll('[data-theme-element="article"]').length;
+        try { btn.click(); } catch (_) { return false; }
+
+        const start = Date.now();
+        while (Date.now() - start < MAX_WAIT_MS) {
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+          const afterCount = Utils.safeQueryAll('[data-theme-element="article"]').length;
+          if (afterCount > beforeCount) return true;
         }
-        // Loại bỏ các text không liên quan
-        text = text
-          .replace(/Mô\s+tả\s+sản\s+phẩm/gi, '')
-          .replace(/Thành\s+phần\s+(của|cho)/gi, '')
-          .replace(/Công\s+dụng\s+của/gi, '')
-          .replace(/Cách\s+dùng\s+/gi, '')
-          .replace(/Tác\s+dụng\s+phụ/gi, '')
-          .replace(/Lưu\s+ý/gi, '')
-          .replace(/Bảo\s+quản/gi, '')
-          .replace(/Thông\s+tin\s+thành\s+phần/gi, '')
-          .replace(/Hàm\s+lượng/gi, '')
-          .replace(/.+là\s+gì\?/gi, '') // Loại bỏ "X là gì?"
-          .replace(/^\d+mg$/gim, '') // Loại bỏ các số đơn lẻ như "180mg", "40mg"
-          .replace(/^Nano\s+Cao\s+/gim, '') // Loại bỏ "Nano Cao" đứng đầu dòng
-          .trim();
+        // Click happened but DOM didn't grow within the budget. Fall through
+        // — extraction will still run; worst case the field stays empty.
+        return true;
+      } catch (_) {
+        return false;
       }
-      
-      return text.trim();
     },
+
     /**
      * Scrape product detail from DOM
      */
@@ -181,7 +96,15 @@
       try {
         const Utils = window.DataScraperUtils;
         const Extractors = window.DataScraperDetailExtractors;
-        
+
+        // Long Châu's "Thông tin sản phẩm" panel splits its rows across two
+        // `div.space-y-4` blocks. The second block (containing fields like
+        // `Quy cách`, `Nhà sản xuất`, `Nước sản xuất`, `Hạn sử dụng`) is
+        // conditionally rendered by React — it's NOT in the DOM until the
+        // user clicks "Xem tất cả thông tin". Trigger that click first so the
+        // hidden rows mount before any extractor runs.
+        await window.DataScraperDetailScraper._revealHiddenSpecSection(Utils);
+
         // ============================================
         // 1. INITIALIZE CONTAINER
         // ============================================
@@ -1192,177 +1115,28 @@
       });
       
       // ============================================
-      // EXTRACT CÁC SECTION TỪ detail-content-*
-      // Ưu tiên tìm theo heading text để đảm bảo đúng section
+      // EXTRACT PRODUCT CONTENT (description / ingredients / usage / dosage /
+      // adverseEffect / careful / preservation)
       // ============================================
-      
-      // Extract description (detail-content-0) - Mô tả sản phẩm
-      // CHỈ lấy từ section description, KHÔNG lấy từ ingredient hoặc các section khác
-      // Nếu không tìm thấy section description → return ""
-      let description = '';
-      const descSectionId = Extractors.findSectionByClassOrHeading('description', /Mô\s+tả\s+sản\s+phẩm/i, 'detail-content-0', Utils);
-      
-      // CHỈ extract nếu tìm thấy section description thực sự
-      if (descSectionId) {
-        // Tìm section description - đảm bảo có class="description"
-        const descSection = Utils.safeQuery(`.description, [class*="description"]`);
-        
-        if (descSection) {
-          // Đảm bảo đây là section description, không phải ingredient hoặc section khác
-          const sectionClass = descSection.className || '';
-          const sectionId = descSection.id || '';
-          
-          // CHỈ extract nếu có class="description" (không phải ingredient, usage, etc.)
-          if (sectionClass.includes('description') && !sectionClass.includes('ingredient') && !sectionClass.includes('usage')) {
-            description = window.DataScraperDetailScraper.extractDetailSection(descSectionId, 'description');
-            
-            // Loại bỏ các text không phải description
-            if (description) {
-              const cleanedDesc = description
-                .split('\n')
-                .map(line => line.trim())
-                .filter(line => 
-                  line.length > 20 && 
-                  !line.match(/là\s+gì\?/i) && 
-                  !line.match(/^(Mô tả|Thành phần|Công dụng|Cách dùng|Tác dụng phụ|Lưu ý|Bảo quản)/i) &&
-                  !line.match(/Thành\s+phần\s+cho/i) && // Loại bỏ "Thành phần cho 1 viên"
-                  !line.match(/Thông\s+tin\s+thành\s+phần/i) && // Loại bỏ "Thông tin thành phần"
-                  !line.match(/Hàm\s+lượng/i) // Loại bỏ "Hàm lượng"
-                )
-                .join('\n')
-                .trim();
-              
-              description = cleanedDesc || '';
-            }
-          }
-        }
-      }
-      
-      // KHÔNG có fallback - nếu không tìm thấy section description thì return ""
-      // Đảm bảo return "" nếu không tìm thấy
-      description = description || '';
-      
-      // Extract ingredients (detail-content-1) - Thành phần
-      let ingredients = '';
-      const ingredientSectionId = Extractors.findSectionByClassOrHeading('ingredient', /Thành\s+phần/i, 'detail-content-1', Utils);
-      if (ingredientSectionId) {
-        // Đảm bảo section có class="ingredient"
-        const ingredientSection = Utils.safeQuery(`.ingredient, [class*="ingredient"]`);
-        if (ingredientSection && (ingredientSection.id === ingredientSectionId || ingredientSection.className.includes('ingredient'))) {
-          // Ưu tiên extract từ table (lấy danh sách tên thành phần)
-          const table = Utils.safeQuery('table', ingredientSection);
-          if (table) {
-            const rows = Utils.safeQueryAll('tr', table);
-            const ingredientList = [];
-            
-            rows.forEach(row => {
-              const cells = Utils.safeQueryAll('td', row);
-              // Lấy tên thành phần từ cell đầu tiên (bỏ qua header)
-              if (cells.length > 0) {
-                const name = Utils.getText(cells[0]).trim();
-                // Bỏ qua header và các text không phải tên thành phần
-                if (name && 
-                    name.length > 2 &&
-                    !name.match(/^(Thông tin thành phần|Hàm lượng|Thành phần cho)/i)) {
-                  ingredientList.push(name);
-                }
-              }
-            });
-            
-            if (ingredientList.length > 0) {
-              ingredients = ingredientList.join(', ');
-            }
-          }
-          
-          // Fallback: extract toàn bộ section nếu không có table
-          if (!ingredients) {
-            ingredients = window.DataScraperDetailScraper.extractDetailSection(ingredientSectionId, 'ingredient');
-          }
-        }
-      }
-      // Fallback: từ specifications
-      if (!ingredients && specifications['Thành phần']) {
-        ingredients = specifications['Thành phần'];
-      }
-      // Đảm bảo return "" nếu không tìm thấy
-      ingredients = ingredients || '';
-      
-      // Extract usage (detail-content-2) - Công dụng
-      let usage = '';
-      const usageSectionId = Extractors.findSectionByClassOrHeading('usage', /Công\s+dụng/i, 'detail-content-2', Utils);
-      if (usageSectionId) {
-        // Đảm bảo section có class="usage"
-        const usageSection = Utils.safeQuery(`.usage, [class*="usage"]`);
-        if (usageSection && (usageSection.id === usageSectionId || usageSection.className.includes('usage'))) {
-          usage = window.DataScraperDetailScraper.extractDetailSection(usageSectionId, 'usage');
-        }
-      }
-      // Đảm bảo return "" nếu không tìm thấy
-      usage = usage || '';
-      
-      // Extract dosage (detail-content-3) - Cách dùng
-      let dosage = '';
-      const dosageSectionId = Extractors.findSectionByClassOrHeading('dosage', /Cách\s+dùng/i, 'detail-content-3', Utils);
-      if (dosageSectionId) {
-        // Đảm bảo section có class="dosage"
-        const dosageSection = Utils.safeQuery(`.dosage, [class*="dosage"]`);
-        if (dosageSection && (dosageSection.id === dosageSectionId || dosageSection.className.includes('dosage'))) {
-          dosage = window.DataScraperDetailScraper.extractDetailSection(dosageSectionId, 'dosage');
-        }
-      }
-      // Đảm bảo return "" nếu không tìm thấy
-      dosage = dosage || '';
-      
-      // Extract adverseEffect (detail-content-4) - Tác dụng phụ
-      let adverseEffect = '';
-      const adverseSectionId = Extractors.findSectionByClassOrHeading('adverseEffect', /Tác\s+dụng\s+phụ/i, 'detail-content-4', Utils);
-      if (adverseSectionId) {
-        // Đảm bảo section có class="adverseEffect"
-        const adverseSection = Utils.safeQuery(`.adverseEffect, [class*="adverseEffect"]`);
-        if (adverseSection && (adverseSection.id === adverseSectionId || adverseSection.className.includes('adverseEffect'))) {
-          adverseEffect = window.DataScraperDetailScraper.extractDetailSection(adverseSectionId, 'adverseEffect');
-        }
-      }
-      
-      // Kiểm tra xem có phải là preservation không (nếu có "nơi khô", "bảo quản" thì không phải adverseEffect)
-      if (adverseEffect && (
-        adverseEffect.match(/nơi\s+khô/i) || 
-        adverseEffect.match(/bảo\s+quản/i) ||
-        adverseEffect.match(/nhiệt\s+độ/i) ||
-        adverseEffect.match(/tránh\s+ánh\s+sáng/i)
-      )) {
-        // Đây là preservation, không phải adverseEffect
-        adverseEffect = '';
-      }
-      
-      // Đảm bảo return "" nếu không tìm thấy
-      adverseEffect = adverseEffect || '';
-      
-      // Extract careful (detail-content-5) - Lưu ý
-      let careful = '';
-      const carefulSectionId = Extractors.findSectionByClassOrHeading('careful', /Lưu\s+ý/i, 'detail-content-5', Utils);
-      if (carefulSectionId) {
-        // Đảm bảo section có class="careful"
-        const carefulSection = Utils.safeQuery(`.careful, [class*="careful"]`);
-        if (carefulSection && (carefulSection.id === carefulSectionId || carefulSection.className.includes('careful'))) {
-          careful = window.DataScraperDetailScraper.extractDetailSection(carefulSectionId, 'careful');
-        }
-      }
-      // Đảm bảo return "" nếu không tìm thấy
-      careful = careful || '';
-      
-      // Extract preservation (detail-content-6) - Bảo quản
-      let preservation = '';
-      const preservationSectionId = Extractors.findSectionByClassOrHeading('preservation', /Bảo\s+quản/i, 'detail-content-6', Utils);
-      if (preservationSectionId) {
-        // Đảm bảo section có class="preservation"
-        const preservationSection = Utils.safeQuery(`.preservation, [class*="preservation"]`);
-        if (preservationSection && (preservationSection.id === preservationSectionId || preservationSection.className.includes('preservation'))) {
-          preservation = window.DataScraperDetailScraper.extractDetailSection(preservationSectionId, 'preservation');
-        }
-      }
-      // Đảm bảo return "" nếu không tìm thấy
-      preservation = preservation || '';
+      // All 7 fields are produced by `DataScraperProductContentStrategy`
+      // (see strategies/product-content-strategy.js). It owns:
+      //   - sanitized HTML extraction for the 6 prose fields,
+      //   - popup-aware ingredients extraction (Radix dialog click + parse +
+      //     auto-close), with fallback to inline table or spec row,
+      //   - the adverseEffect ↔ preservation guard.
+      // The strategy awaits its own popup mutation to fully unwind before
+      // resolving so the spec extraction below sees a clean DOM.
+      const ContentStrategy = window.DataScraperProductContentStrategy;
+      const content = ContentStrategy
+        ? await ContentStrategy.extract(specifications, Utils, Extractors)
+        : { description: '', ingredients: '', usage: '', dosage: '', adverseEffect: '', careful: '', preservation: '' };
+      const description = content.description;
+      const ingredients = content.ingredients;
+      const usage = content.usage;
+      const dosage = content.dosage;
+      const adverseEffect = content.adverseEffect;
+      const careful = content.careful;
+      const preservation = content.preservation;
       
       // Extract thông tin bổ sung từ specifications table
       // Tìm element [data-theme-element="article"] trong row có label tương ứng
@@ -1437,9 +1211,18 @@
       }
       
       // Extract shelfLife (Hạn sử dụng)
+      // Strategy 0 (preferred, 2026 layout): match the spec row by its value
+      // column class (`div.flex-1.!max-w-full`) and verify the row label.
+      // This is a tighter scope than the historical strategies below, which
+      // were over-broad and surfaced the wrong article element when the layout
+      // had multiple `[data-theme-element="article"]` nodes per page.
+      shelfLife = Extractors.extractSpecRowValueByLabel(/Hạn\s+sử\s+dụng/i, detailContainer, Utils);
+
       // Strategy 1: Tìm div.space-y-4 (hoặc container tương tự) - hạn sử dụng thường là element cuối cùng
-      const spaceY4Container = Utils.safeQuery('div.space-y-4, div[class*="space-y-4"]', detailContainer) ||
-                               Utils.safeQuery('div[class*="space-y"]', detailContainer);
+      const spaceY4Container = !shelfLife
+        ? (Utils.safeQuery('div.space-y-4, div[class*="space-y-4"]', detailContainer) ||
+           Utils.safeQuery('div[class*="space-y"]', detailContainer))
+        : null;
       
       if (spaceY4Container) {
         const containerText = Utils.getText(spaceY4Container).trim();
@@ -1552,7 +1335,25 @@
           shelfLife = shelfLifeMatch[1].trim();
         }
       }
-      
+
+      // Extract registrationNumber (Số đăng ký) — Long Châu's 2026 layout puts
+      // this in the same "Thông tin sản phẩm" spec table as `Hạn sử dụng`.
+      // The detail-scraper used to leave this empty because the only source
+      // was the legacy `<table>`-based `specifications['Số đăng ký']`, which
+      // the new layout no longer emits.
+      let registrationNumber = Extractors.extractSpecRowValueByLabel(
+        /S[ốo]\s+đăng\s+k[ýy]/i,
+        detailContainer,
+        Utils
+      );
+      if (!registrationNumber && specifications['Số đăng ký']) {
+        registrationNumber = specifications['Số đăng ký'].trim();
+      }
+      if (!registrationNumber) {
+        const m = fullText.match(/S[ốo]\s+đăng\s+k[ýy][:\s]+([^\n\r]+)/i);
+        if (m) registrationNumber = m[1].trim();
+      }
+
       if (specifications['Quy cách'] && !packageSize) {
         packageSize = specifications['Quy cách'];
       }
@@ -1638,6 +1439,7 @@
         origin: (origin || '').trim(),
         manufacturer: (manufacturer || '').trim(),
         shelfLife: (shelfLife || '').trim(),
+        registrationNumber: (registrationNumber || '').trim(),
         specifications: specifications || {},
         link: link.trim(),
         slug: slug,

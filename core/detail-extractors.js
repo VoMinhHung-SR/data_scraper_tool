@@ -183,6 +183,97 @@
     },
 
     /**
+     * Extract a spec-row value by matching the row's label, scoped to Long Châu's
+     * 2026 product-detail layout where each spec row is shaped like:
+     *
+     *   <div class="flex umd:flex-col umd:gap-0.5">
+     *     <span|p|div>Hạn sử dụng</span|p|div>            <!-- label -->
+     *     <div class="flex-1 !max-w-full">                <!-- value column -->
+     *       <div class="posts-detail_posts-detail-container__...">
+     *         <div data-theme-element="article">VALUE</div>
+     *       </div>
+     *     </div>
+     *   </div>
+     *
+     * Strategy: iterate `[data-theme-element="article"]` LEAVES (Long Châu's
+     * stable value marker) and walk up the parent chain to find the smallest
+     * ancestor whose text matches the label pattern, bounded by
+     * `MAX_ROW_TEXT_LEN` so we don't match high-up section containers that
+     * happen to mention the label elsewhere (e.g. inside description content).
+     *
+     * Why structure-based instead of class-based:
+     * - Earlier attempts anchored on `div[class*="flex-1"][class*="max-w-full"]`
+     *   (the value column) but observed empty `shelfLife` even when sibling rows
+     *   like `registrationNumber` succeeded. Long Châu's Tailwind variants for
+     *   responsive prefixes (`omd:flex-1`, `!flex-1`, etc.) and CSS Modules
+     *   build hashes drift per row/section, so substring class matching is
+     *   unreliable across rows.
+     * - `[data-theme-element="article"]` is set explicitly by Long Châu on every
+     *   spec value leaf and is the same across product types — much more stable.
+     */
+    extractSpecRowValueByLabel: (labelPattern, container, Utils) => {
+      if (!labelPattern) return '';
+      const MAX_WALK_UP_DEPTH = 10;
+      // A spec-row label is a short text node (e.g. "Hạn sử dụng",
+      // "Số đăng ký", "Xuất xứ thương hiệu"). Anything longer is a row body
+      // or a section concatenation; we don't want to mistake those for labels.
+      const MAX_LABEL_CELL_LEN = 60;
+
+      const _searchIn = (root) => {
+        if (!root) return '';
+        const articles = Utils.safeQueryAll('[data-theme-element="article"]', root);
+        for (const article of articles) {
+          const valueText = Utils.getText(article).trim();
+          if (!valueText) continue;
+          // Skip articles that ARE the label itself (Long Châu sometimes marks
+          // labels with the same `data-theme-element` attribute).
+          if (labelPattern.test(valueText)) continue;
+
+          // Walk up: the spec row is the smallest ancestor that has at least
+          // one DIRECT child whose own text is short (i.e. a label cell) and
+          // matches `labelPattern`. This is robust to:
+          //   - rows that hold multiple `[data-theme-element="article"]`
+          //     siblings (e.g. "Số đăng ký" row containing both the value and
+          //     the "Xem giấy công bố sản phẩm" link).
+          //   - section/page-level ancestors whose concatenated text happens
+          //     to include the label, because such ancestors only have row
+          //     children whose text is much longer than `MAX_LABEL_CELL_LEN`.
+          let node = article.parentElement;
+          let depth = 0;
+          while (node && depth < MAX_WALK_UP_DEPTH) {
+            const children = node.children ? Array.from(node.children) : [];
+            // Long Châu's spec row always renders the label as the FIRST child
+            // and the value column after it. Checking only the first child
+            // (rather than any child) is what stops us from false-matching at
+            // the block / section level — at those levels the first child is
+            // a sibling row whose text concatenates BOTH a label and a value,
+            // which fails the strict "≤ MAX_LABEL_CELL_LEN AND not value text"
+            // checks below. (See test fixtures in
+            // plans/[UnDone] csv-importer-fields-cleanup.plan.md §X4 history.)
+            const firstChild = children[0];
+            if (firstChild) {
+              const firstText = Utils.getText(firstChild).trim();
+              if (firstText && firstText.length <= MAX_LABEL_CELL_LEN &&
+                  firstText !== valueText && !firstText.includes(valueText) &&
+                  labelPattern.test(firstText)) {
+                return valueText.replace(/\s*Sao\s+chép.*/i, '').trim();
+              }
+            }
+            node = node.parentElement;
+            depth++;
+          }
+        }
+        return '';
+      };
+      // Try the caller-provided scope first (cheaper, fewer false positives),
+      // then fall back to `document.body`. The "Thông tin sản phẩm" tab on
+      // Long Châu's 2026 layout often lives outside the
+      // `[data-lcpr="prr-id-product-detail-product-information"]` sub-tree
+      // that the detail scraper hands in as `detailContainer`.
+      return _searchIn(container) || _searchIn(typeof document !== 'undefined' ? document.body : null);
+    },
+
+    /**
      * Extract value from row with specific label
      */
     extractSpecValue: (labelPattern, container, Utils) => {

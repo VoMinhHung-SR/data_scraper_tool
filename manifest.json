@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "📊 Data Scraper Tool",
-  "version": "1.2.5",
+  "version": "1.3.4",
   "description": "Công cụ scrape và export dữ liệu từ trang web",
   "action": {
     "default_popup": "popup.html",
@@ -28,6 +28,7 @@
         "core/pagination-handler.js",
         "core/product-scraper.js",
         "core/scrape-workflow.js",
+        "strategies/product-content-strategy.js",
         "core/detail-scraper.js",
         "core/detail-extractors.js",
         "core/list-scraper.js",

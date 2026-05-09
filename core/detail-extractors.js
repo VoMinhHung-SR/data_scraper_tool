@@ -7,6 +7,28 @@
   // Helper functions for product detail extraction
   // Extracted from content.js for better organization
 
+  /**
+   * Reject obviously-bad brand candidates that came from misfired selectors.
+   * Long Châu DOM has many `div.font-medium` nodes; without this guard the
+   * extractor used to leak gallery overlays like "Xem thêm 4 ảnh" into
+   * `basicInfo.brand`, which then created junk `Brand` rows on import.
+   */
+  const _isValidBrand = (text) => {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.trim();
+    if (t.length < 2 || t.length > 80) return false;
+    // Gallery / UI noise observed on Long Châu detail pages.
+    if (/^Xem\s+thêm/i.test(t)) return false;
+    if (/^Sao\s+chép/i.test(t)) return false;
+    if (/^Tra\s+cứu/i.test(t)) return false;
+    if (/^\d+\s*ảnh$/i.test(t)) return false;
+    // Pure number (e.g. accidental price/sku capture).
+    if (/^\d+([.,]\d+)?$/.test(t)) return false;
+    // Currency / quantity patterns.
+    if (/^\d{1,3}([.,]\d{3})*\s*[₫đ]/i.test(t)) return false;
+    return true;
+  };
+
   window.DataScraperDetailExtractors = {
     /**
      * Extract price information from container
@@ -158,6 +180,97 @@
       // Fallback: remove special chars and use as-is
       const normalized = lower.replace(/[^a-z0-9]/g, '');
       return normalized || 'default';
+    },
+
+    /**
+     * Extract a spec-row value by matching the row's label, scoped to Long Châu's
+     * 2026 product-detail layout where each spec row is shaped like:
+     *
+     *   <div class="flex umd:flex-col umd:gap-0.5">
+     *     <span|p|div>Hạn sử dụng</span|p|div>            <!-- label -->
+     *     <div class="flex-1 !max-w-full">                <!-- value column -->
+     *       <div class="posts-detail_posts-detail-container__...">
+     *         <div data-theme-element="article">VALUE</div>
+     *       </div>
+     *     </div>
+     *   </div>
+     *
+     * Strategy: iterate `[data-theme-element="article"]` LEAVES (Long Châu's
+     * stable value marker) and walk up the parent chain to find the smallest
+     * ancestor whose text matches the label pattern, bounded by
+     * `MAX_ROW_TEXT_LEN` so we don't match high-up section containers that
+     * happen to mention the label elsewhere (e.g. inside description content).
+     *
+     * Why structure-based instead of class-based:
+     * - Earlier attempts anchored on `div[class*="flex-1"][class*="max-w-full"]`
+     *   (the value column) but observed empty `shelfLife` even when sibling rows
+     *   like `registrationNumber` succeeded. Long Châu's Tailwind variants for
+     *   responsive prefixes (`omd:flex-1`, `!flex-1`, etc.) and CSS Modules
+     *   build hashes drift per row/section, so substring class matching is
+     *   unreliable across rows.
+     * - `[data-theme-element="article"]` is set explicitly by Long Châu on every
+     *   spec value leaf and is the same across product types — much more stable.
+     */
+    extractSpecRowValueByLabel: (labelPattern, container, Utils) => {
+      if (!labelPattern) return '';
+      const MAX_WALK_UP_DEPTH = 10;
+      // A spec-row label is a short text node (e.g. "Hạn sử dụng",
+      // "Số đăng ký", "Xuất xứ thương hiệu"). Anything longer is a row body
+      // or a section concatenation; we don't want to mistake those for labels.
+      const MAX_LABEL_CELL_LEN = 60;
+
+      const _searchIn = (root) => {
+        if (!root) return '';
+        const articles = Utils.safeQueryAll('[data-theme-element="article"]', root);
+        for (const article of articles) {
+          const valueText = Utils.getText(article).trim();
+          if (!valueText) continue;
+          // Skip articles that ARE the label itself (Long Châu sometimes marks
+          // labels with the same `data-theme-element` attribute).
+          if (labelPattern.test(valueText)) continue;
+
+          // Walk up: the spec row is the smallest ancestor that has at least
+          // one DIRECT child whose own text is short (i.e. a label cell) and
+          // matches `labelPattern`. This is robust to:
+          //   - rows that hold multiple `[data-theme-element="article"]`
+          //     siblings (e.g. "Số đăng ký" row containing both the value and
+          //     the "Xem giấy công bố sản phẩm" link).
+          //   - section/page-level ancestors whose concatenated text happens
+          //     to include the label, because such ancestors only have row
+          //     children whose text is much longer than `MAX_LABEL_CELL_LEN`.
+          let node = article.parentElement;
+          let depth = 0;
+          while (node && depth < MAX_WALK_UP_DEPTH) {
+            const children = node.children ? Array.from(node.children) : [];
+            // Long Châu's spec row always renders the label as the FIRST child
+            // and the value column after it. Checking only the first child
+            // (rather than any child) is what stops us from false-matching at
+            // the block / section level — at those levels the first child is
+            // a sibling row whose text concatenates BOTH a label and a value,
+            // which fails the strict "≤ MAX_LABEL_CELL_LEN AND not value text"
+            // checks below. (See test fixtures in
+            // plans/[UnDone] csv-importer-fields-cleanup.plan.md §X4 history.)
+            const firstChild = children[0];
+            if (firstChild) {
+              const firstText = Utils.getText(firstChild).trim();
+              if (firstText && firstText.length <= MAX_LABEL_CELL_LEN &&
+                  firstText !== valueText && !firstText.includes(valueText) &&
+                  labelPattern.test(firstText)) {
+                return valueText.replace(/\s*Sao\s+chép.*/i, '').trim();
+              }
+            }
+            node = node.parentElement;
+            depth++;
+          }
+        }
+        return '';
+      };
+      // Try the caller-provided scope first (cheaper, fewer false positives),
+      // then fall back to `document.body`. The "Thông tin sản phẩm" tab on
+      // Long Châu's 2026 layout often lives outside the
+      // `[data-lcpr="prr-id-product-detail-product-information"]` sub-tree
+      // that the detail scraper hands in as `detailContainer`.
+      return _searchIn(container) || _searchIn(typeof document !== 'undefined' ? document.body : null);
     },
 
     /**
@@ -319,20 +432,43 @@
       }
       
       // Extract brand
+      // Strategy 1 (primary): brand is rendered as a hyperlink to the brand
+      // listing page, e.g. <a href="/thuong-hieu/hlh-biopharma">HLH BIOPHARMA</a>.
+      // This is the most reliable anchor on Long Châu detail pages.
       let brand = '';
-      const brandEl = Utils.safeQuery('div.font-medium', container);
-      if (brandEl) {
-        const brandText = Utils.getText(brandEl);
-        const brandMatch = brandText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
-        if (brandMatch) {
-          brand = brandMatch[1].trim();
-        } else {
-          brand = brandText.replace(/Thương\s+hiệu[:\s]*/gi, '').trim();
+      const brandLink = Utils.safeQuery('a[href*="/thuong-hieu/"], a[href*="thuong-hieu"]', container);
+      if (brandLink) {
+        const linkText = Utils.getText(brandLink).trim();
+        if (_isValidBrand(linkText)) {
+          brand = linkText;
         }
-      } else {
-        const brandMatch = fullText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
-        if (brandMatch) {
-          brand = brandMatch[1].trim().split(/\s+/)[0];
+      }
+
+      // Strategy 2: fall back to text after the "Thương hiệu" label in fullText.
+      if (!brand) {
+        const labelMatch = fullText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
+        if (labelMatch) {
+          // Take the first sensible token group (avoid trailing labels like
+          // "Số đăng ký..." that may be on the same line in some layouts).
+          const candidate = labelMatch[1].trim().split(/\s{2,}|\t|\|/)[0].trim();
+          if (_isValidBrand(candidate)) {
+            brand = candidate;
+          }
+        }
+      }
+
+      // Strategy 3 (last resort): the legacy `div.font-medium` heuristic, but
+      // only when its text actually contains the "Thương hiệu" label so we
+      // don't capture gallery overlays like "Xem thêm 4 ảnh".
+      if (!brand) {
+        const brandEl = Utils.safeQuery('div.font-medium', container);
+        if (brandEl) {
+          const brandText = Utils.getText(brandEl);
+          const m = brandText.match(/Thương\s+hiệu[:\s]+([^\n\r]+)/i);
+          if (m) {
+            const candidate = m[1].trim();
+            if (_isValidBrand(candidate)) brand = candidate;
+          }
         }
       }
       

@@ -335,11 +335,6 @@
       return await window.DataScraperDetailScraper.scrapeProductDetail(forceAPI);
     },
 
-    extractDetailSection: (sectionId, className = null) => {
-      // Delegate to detail-scraper module
-      return window.DataScraperDetailScraper.extractDetailSection(sectionId, className);
-    },
-
     // Scrape chi tiết từ DOM (fallback)
     scrapeProductDetailFromDOM: async () => {
       // Delegate to detail-scraper module

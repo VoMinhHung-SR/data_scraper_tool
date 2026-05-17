@@ -234,6 +234,10 @@
           🏥 <strong>Long Châu Specific:</strong> Các tính năng này được tối ưu đặc biệt cho website Long Châu (nhathuoclongchau.com).
         </div>
         
+        <div style="font-size: 11px; color: #666; text-align: right; margin-bottom: 15px; font-weight: 500;">
+          Total Requests Sent: <span id="sessionRequestCount" style="color: #1976d2; font-weight: bold;">0</span>
+        </div>
+        
         <!-- Processing Status -->
         <div id="processingStatus" style="display: none;">
           <div class="processing-title">🔄 Đang xử lý:</div>
@@ -241,21 +245,20 @@
         </div>
         
         <div class="section-title" style="font-size: 13px; margin-top: 15px;">🛍️ Scrape danh sách sản phẩm</div>
+
         
-        <button class="btn btn-primary" id="scrapeProducts" style="margin-bottom: 15px;">
-          🛍️ Scrape Products (Đơn giản)
-        </button>
-        
-        <div class="input-group">
-          <label>Skip sản phẩm đầu tiên (bỏ qua N sản phẩm đầu):</label>
-          <input type="number" id="skipProducts" value="0" min="0" max="1000" placeholder="0">
-          <div style="font-size: 11px; color: #666; margin-top: 5px;">
-            💡 Ví dụ: Skip 50, Get 100 → sẽ lấy sản phẩm thứ 51-151
+        <div style="display: flex; gap: 10px;">
+          <div class="input-group" style="flex: 1;">
+            <label>Skip sản phẩm đầu:</label>
+            <input type="number" id="skipProducts" value="0" min="0" max="1000" placeholder="0">
+            <div style="font-size: 11px; color: #666; margin-top: 5px;">
+              💡 Skip 50, Get 100 → lấy 51-151
+            </div>
           </div>
-        </div>
-        <div class="input-group">
-          <label>Số lượng sản phẩm cần scrape:</label>
-          <input type="number" id="maxProducts" value="100" min="1" max="1000">
+          <div class="input-group" style="flex: 1;">
+            <label>Số lượng sản phẩm:</label>
+            <input type="number" id="maxProducts" value="100" min="1" max="1000">
+          </div>
         </div>
         <div class="input-group" style="margin-top: 10px;">
           <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
@@ -280,19 +283,18 @@
           </div>
           <div id="selectorInfo" style="margin-top: 5px; font-size: 11px; color: #666;"></div>
         </div>
-        <div style="display: flex; gap: 5px;">
-          <button class="btn btn-primary" id="scrapeManyProducts" style="flex: 1;">
-            📊 Scrape (Scroll)
-          </button>
-          <button class="btn btn-primary" id="scrapeWithPagination" style="flex: 1; background: #4CAF50;">
-            📄 Scrape (Pagination)
-          </button>
+        <div class="input-group" style="margin-top: 15px; margin-bottom: 15px; padding: 10px; border: 1px dashed #ccc; border-radius: 6px; background-color: #fafafa;">
+          <label>Thời gian nghỉ giữa các sản phẩm (mili-giây):</label>
+          <input type="number" id="scrapeDelay" value="5000" min="1000" step="1000">
+          <div style="font-size: 11px; color: #666; margin-top: 5px;">
+            💡 Khuyến nghị (RCM): 5000 - 7000ms để tránh bị chặn (lỗi 429). Sản phẩm đặc biệt (thuốc tư vấn) sẽ tự động +2000ms.
+          </div>
         </div>
         <button class="btn btn-primary" id="scrapeListAndDetails" style="margin-top: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); width: 100%;">
           🚀 Scrape List + Detail (1 Click)
         </button>
         <div style="font-size: 11px; color: #666; margin-top: 5px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
-          💡 <strong>1 Click:</strong> Tự động scrape danh sách sản phẩm, sau đó tự động scrape chi tiết từ các link đã lấy. Tiện lợi và nhanh chóng!
+          💡 <strong>1 Click:</strong> Tự động scrape danh sách sản phẩm, sau đó tự động scrape chi tiết từ các link đã lấy.
         </div>
         <div class="input-group" style="margin-top: 10px;">
           <label>Load More Button Selector (cho scroll, để trống để tự động tìm):</label>
@@ -303,7 +305,7 @@
           <input type="text" id="nextPageSelector" placeholder="a[href*='page='], .next, etc.">
         </div>
         <div class="input-group" style="margin-top: 15px;">
-          <label>Scrape chi tiết sản phẩm:</label>
+          <label>Scrape chi tiết (Chạy thủ công):</label>
         </div>
         <div class="input-group" style="margin-top: 10px;">
           <label>

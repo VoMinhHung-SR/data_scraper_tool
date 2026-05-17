@@ -170,9 +170,11 @@
 
       const skipProductsInput = document.getElementById('skipProducts');
       const forceAPIInput = document.getElementById('forceAPIScraping');
+      const scrapeDelayInput = document.getElementById('scrapeDelay');
       
       const skipProducts = parseInt(skipProductsInput?.value) || 0;
       const forceAPI = forceAPIInput ? forceAPIInput.checked : false;
+      const scrapeDelay = parseInt(scrapeDelayInput?.value) || 5000;
 
       const productLinks = currentData
         .map(p => p.link || p.url || p.href)
@@ -239,7 +241,7 @@
         type: 'productDetailsFromList',
         options: {
           productLinks: productLinks.slice(0, maxDetails),
-          delay: 2000,
+          delay: scrapeDelay,
           maxDetails: maxDetails,
           forceAPI: forceAPI,
           skip: skipProducts // Pass skip value to calculate actual item number (1-based)
@@ -556,6 +558,8 @@
         if (chrome.runtime.lastError) {
           console.error('[ScrapeListAndDetails] Error clearing states:', chrome.runtime.lastError);
         }
+        // Initialize request counter for new session
+        chrome.storage.local.set({ sessionRequestCount: 0 });
         // Continue after cleanup
       });
       
@@ -569,6 +573,7 @@
       const containerSelectorInput = document.getElementById('containerSelector');
       const loadMoreSelectorInput = document.getElementById('loadMoreSelector');
       const nextPageSelectorInput = document.getElementById('nextPageSelector');
+      const scrapeDelayInput = document.getElementById('scrapeDelay');
       
       let maxProducts = parseInt(maxProductsInput?.value) || 100;
       let skipProducts = parseInt(skipProductsInput?.value) || 0;
@@ -576,6 +581,7 @@
       const containerSelector = containerSelectorInput?.value.trim() || null;
       const loadMoreSelector = loadMoreSelectorInput?.value.trim() || null;
       const nextPageSelector = nextPageSelectorInput?.value.trim() || null;
+      const scrapeDelay = parseInt(scrapeDelayInput?.value) || 5000;
       const maxDetails = maxProducts; // Limit details = list (same limit)
       
       // Validate skip + limit
@@ -642,6 +648,7 @@
             loadMoreSelector: loadMoreSelector,
             nextPageSelector: nextPageSelector,
             forceAPI: forceAPI,
+            delay: scrapeDelay,
             onProgress: (progressData) => {
               // Update progress
               if (processingText) {

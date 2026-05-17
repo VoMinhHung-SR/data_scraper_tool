@@ -20,9 +20,15 @@
       }
 
       // Normalize links
-      const normalizedLinks = links.slice(0, total).map(link => 
+      let normalizedLinks = links.slice(0, total).map(link => 
         typeof link === 'string' ? link : (link.link || link.url || '')
       ).filter(link => link && link.includes('.html'));
+
+      // Shuffle links to avoid predictable scraping patterns (bot detection)
+      for (let i = normalizedLinks.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [normalizedLinks[i], normalizedLinks[j]] = [normalizedLinks[j], normalizedLinks[i]];
+      }
 
       if (normalizedLinks.length === 0) {
         return [];
@@ -36,6 +42,7 @@
         details: [],
         maxDetails: maxDetails, // Store maxDetails limit
         forceAPI: options.forceAPI || false, // Store forceAPI option
+        delay: options.delay || 5000, // Store delay option
         startedAt: Date.now(),
         failedLinks: [],
         attempts: {},
@@ -59,7 +66,12 @@
 
       // Navigate to first product (auto-scrape sẽ tiếp tục)
       const firstLink = normalizedLinks[0];
-      window.location.href = firstLink;
+      const baseDelay = options.delay || 5000;
+      const jitter = Math.floor(Math.random() * 1500);
+      
+      setTimeout(() => {
+        window.location.href = firstLink;
+      }, baseDelay + jitter);
       
       // Return empty - details will be collected via storage and sent to popup
       return [];

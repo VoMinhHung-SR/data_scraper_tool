@@ -544,9 +544,6 @@
     return false;
   });
 
-  // ============================================
-  // 📥 DOWNLOAD COMPLETION HANDLER
-  // ============================================
   chrome.downloads.onChanged.addListener((downloadDelta) => {
     if (downloadDelta.error && downloadDelta.error.current) {
       const error = downloadDelta.error.current;
@@ -556,5 +553,31 @@
       }
     }
   });
+
+  // ============================================
+  // 🔍 NETWORK REQUEST TRACKER
+  // ============================================
+  // Track actual fetches and main frame navigations for accurate session request counting
+  if (chrome.webRequest && chrome.webRequest.onCompleted) {
+    chrome.webRequest.onCompleted.addListener(
+      (details) => {
+        // We only want to count requests that typically trigger WAF (API fetches and page loads)
+        // Ignored: stylesheet, image, font, script, ping
+        const relevantTypes = ['main_frame', 'xmlhttprequest'];
+        
+        if (relevantTypes.includes(details.type)) {
+          // Increment the sessionRequestCount in storage
+          chrome.storage.local.get(['sessionRequestCount', 'scrapeDetailsState', 'paginationState'], (result) => {
+            // Only count if there's an active scraping session
+            if (result.scrapeDetailsState || result.paginationState) {
+              const currentCount = result.sessionRequestCount || 0;
+              chrome.storage.local.set({ sessionRequestCount: currentCount + 1 });
+            }
+          });
+        }
+      },
+      { urls: ["<all_urls>"] }
+    );
+  }
 
 })();

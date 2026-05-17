@@ -968,8 +968,9 @@
             : (nextLinkItem?.link || nextLinkItem?.url);
           
           if (nextLink && typeof nextLink === 'string' && nextLink.trim() !== '') {
-            // Add delay 2s if price is CONSULT to avoid traffic overload
             if (isConsultPrice) {
+              const baseDelay = state.delay + 2000;
+              const jitter = Math.floor(Math.random() * 1500); // 0-1.5s jitter
               setTimeout(() => {
                 chrome.storage.local.set({ scrapeDetailsState: state }, () => {
                   if (chrome.runtime.lastError) {
@@ -984,22 +985,26 @@
                     chrome.storage.local.remove(['scrapeDetailsState']);
                   }
                 });
-              }, 2000); // 2 second delay when price is CONSULT to avoid traffic overload
+              }, baseDelay + jitter); // Thêm 2 giây khi có CONSULT price để tránh bị block + jitter
             } else {
-              // Normal navigation when price is not CONSULT - no delay needed
-              chrome.storage.local.set({ scrapeDetailsState: state }, () => {
-                if (chrome.runtime.lastError) {
-                  console.error('[Content] Error saving state before navigation:', chrome.runtime.lastError);
-                  return;
-                }
-                try {
-                  // Navigate to next product - page load sẽ được handle bởi window.onload listener
-                  window.location.href = nextLink;
-                } catch (e) {
-                  console.error('[Content] Error navigating to next link:', e);
-                  chrome.storage.local.remove(['scrapeDetailsState']);
-                }
-              });
+              // Normal navigation when price is not CONSULT - added delay to prevent race conditions and IP block
+              const baseDelay = state.delay || 5000;
+              const jitter = Math.floor(Math.random() * 1500); // 0-1.5s jitter
+              setTimeout(() => {
+                chrome.storage.local.set({ scrapeDetailsState: state }, () => {
+                  if (chrome.runtime.lastError) {
+                    console.error('[Content] Error saving state before navigation:', chrome.runtime.lastError);
+                    return;
+                  }
+                  try {
+                    // Navigate to next product - page load sẽ được handle bởi window.onload listener
+                    window.location.href = nextLink;
+                  } catch (e) {
+                    console.error('[Content] Error navigating to next link:', e);
+                    chrome.storage.local.remove(['scrapeDetailsState']);
+                  }
+                });
+              }, baseDelay + jitter); // Sử dụng delay từ cấu hình UI + jitter
             }
           } else {
             chrome.storage.local.remove(['scrapeDetailsState']);
@@ -1164,8 +1169,45 @@
           }
         };
         
+        // Helper function to simulate human scroll
+        const simulateHumanScroll = (callback) => {
+          // Tính toán thời gian cuộn ngẫu nhiên (2s - 3.5s)
+          const scrollDuration = 2000 + Math.floor(Math.random() * 1500); 
+          // Cuộn xuống một khoảng ngẫu nhiên (300px - 800px)
+          const targetScrollY = 300 + Math.floor(Math.random() * 500);
+          
+          const startTime = performance.now();
+          const startY = window.scrollY;
+          
+          // Easing function cho mượt
+          const easeOutQuad = t => t * (2 - t);
+          
+          const scrollStep = (currentTime) => {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / scrollDuration, 1);
+            
+            window.scrollTo(0, startY + (targetScrollY - startY) * easeOutQuad(progress));
+            
+            if (progress < 1) {
+              requestAnimationFrame(scrollStep);
+            } else {
+              // Hoàn thành scroll, chờ thêm một chút độ trễ ngẫu nhiên trước khi scrape
+              const finalJitter = 500 + Math.floor(Math.random() * 1000);
+              setTimeout(callback, finalJitter);
+            }
+          };
+          
+          // Chờ ngẫu nhiên 0.5s - 1.5s trước khi bắt đầu cuộn
+          setTimeout(() => {
+            requestAnimationFrame(scrollStep);
+          }, 500 + Math.floor(Math.random() * 1000));
+        };
+
         // Chờ page load hoàn tất trước khi scrape
-        waitForPageLoad(scrapeAndContinue);
+        waitForPageLoad(() => {
+          // Thay vì dùng setTimeout tĩnh, chúng ta giả lập human scroll
+          simulateHumanScroll(scrapeAndContinue);
+        });
       }
     }
   });
@@ -1396,7 +1438,9 @@
           });
 
           if (nextButton.href) {
-            window.location.href = nextButton.href;
+            setTimeout(() => {
+              window.location.href = nextButton.href;
+            }, pageDelay);
           } else {
             nextButton.click();
             setTimeout(continueScraping, pageDelay);
@@ -1444,7 +1488,10 @@
       };
       
       // Chờ page load hoàn tất trước khi scrape
-      waitForPageLoad(continueScraping);
+      waitForPageLoad(() => {
+        const initialDelay = 1000 + Math.floor(Math.random() * 1000); // 1-2s delay
+        setTimeout(continueScraping, initialDelay);
+      });
     }
     
     // Save current URL for state management

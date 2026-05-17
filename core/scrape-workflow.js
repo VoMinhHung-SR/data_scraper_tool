@@ -32,6 +32,7 @@
         loadMoreSelector = null,
         nextPageSelector = null,
         forceAPI = false,
+        delay = 5000,
         onProgress = null,
         onComplete = null,
         onError = null
@@ -98,6 +99,7 @@
         const details = await this._scrapeDetails({
           productLinks,
           forceAPI,
+          delay,
           onProgress: (progressData) => {
             if (onProgress) {
               onProgress({
@@ -199,7 +201,7 @@
           scrapeOptions.loadMoreSelector = loadMoreSelector;
           scrapeOptions.useLoadMore = true;
           // Optimized delay: faster when DOM is ready
-          scrapeOptions.scrollDelay = 700; // Reduced from 1000ms
+          scrapeOptions.scrollDelay = 5000; // Increased to avoid IP block
           // Tính số scrolls cần thiết dựa trên maxProducts
           // Thực tế mỗi scroll chỉ load ~8-12 items (không phải 15-20)
           // Ước tính an toàn: 8 items/scroll, buffer 40 để đảm bảo scrape đủ
@@ -209,7 +211,7 @@
         } else {
           scrapeOptions.nextPageSelector = nextPageSelector;
           // Optimized delay: faster when DOM is ready
-          scrapeOptions.pageDelay = 1200; // Reduced from 2000ms
+          scrapeOptions.pageDelay = 10000; // Increased to avoid IP block
           // Tính số pages cần thiết dựa trên maxProducts (ước tính mỗi page ~20-30 sản phẩm)
           scrapeOptions.maxPages = Math.ceil(maxProducts / 20) + 2; // Thêm buffer
         }
@@ -253,6 +255,7 @@
       const {
         productLinks,
         forceAPI = false,
+        delay = 5000,
         onProgress
       } = options;
 
@@ -292,7 +295,7 @@
             type: 'productDetailsFromList',
             options: {
               productLinks: productLinks,
-              delay: 2000,
+              delay: delay, // Truyền delay từ UI
               maxDetails: productLinks.length,
               forceAPI: forceAPI
             }

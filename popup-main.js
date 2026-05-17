@@ -16,12 +16,28 @@
       window.PopupDisplay.loadPageInfo(tab);
       
       // Set defaults: autoExportEnabled=true, manualExportFormat=csv
-      chrome.storage.local.get(['autoExportEnabled', 'manualExportFormat'], (result) => {
+      chrome.storage.local.get(['autoExportEnabled', 'manualExportFormat', 'sessionRequestCount'], (result) => {
         if (result.autoExportEnabled === undefined) {
           chrome.storage.local.set({ autoExportEnabled: true });
         }
         if (!result.manualExportFormat) {
           chrome.storage.local.set({ manualExportFormat: 'csv' });
+        }
+        
+        // Load initial session request count
+        const countEl = document.getElementById('sessionRequestCount');
+        if (countEl) {
+          countEl.textContent = result.sessionRequestCount || 0;
+        }
+      });
+      
+      // Listen for session request count changes
+      chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && changes.sessionRequestCount) {
+          const countEl = document.getElementById('sessionRequestCount');
+          if (countEl) {
+            countEl.textContent = changes.sessionRequestCount.newValue || 0;
+          }
         }
       });
       
